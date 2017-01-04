@@ -15,7 +15,7 @@ import odoo.addons.decimal_precision as dp
 
 class PurchaseOrder(models.Model):
     _name = "purchase.order"
-    _inherit = ['mail.thread', 'ir.needaction_mixin']
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _description = "Purchase Order"
     _order = 'date_order desc, id desc'
 
@@ -103,7 +103,7 @@ class PurchaseOrder(models.Model):
     name = fields.Char('Order Reference', required=True, index=True, copy=False, default='New')
     origin = fields.Char('Source Document', copy=False,\
         help="Reference of the document that generated this purchase order "
-             "request (e.g. a sale order or an internal procurement request)")
+             "request (e.g. a sales order or an internal procurement request)")
     partner_ref = fields.Char('Vendor Reference', copy=False,\
         help="Reference of the sales order or bid sent by the vendor. "
              "It's used to do the matching when you receive the "
@@ -289,6 +289,7 @@ class PurchaseOrder(models.Model):
             'default_use_template': bool(template_id),
             'default_template_id': template_id,
             'default_composition_mode': 'comment',
+            'custom_layout': "purchase.mail_template_data_notification_email_purchase_order"
         })
         return {
             'name': _('Compose Email'),
@@ -308,10 +309,6 @@ class PurchaseOrder(models.Model):
 
     @api.multi
     def button_approve(self, force=False):
-        if self.company_id.po_double_validation == 'two_step'\
-          and self.amount_total >= self.env.user.company_id.currency_id.compute(self.company_id.po_double_validation_amount, self.currency_id)\
-          and not self.user_has_groups('purchase.group_purchase_manager'):
-            raise UserError(_('You need purchase manager access rights to validate an order above %.2f %s.') % (self.company_id.po_double_validation_amount, self.company_id.currency_id.name))
         self.write({'state': 'purchase'})
         self._create_picking()
         if self.company_id.po_lock == 'lock':
@@ -330,8 +327,11 @@ class PurchaseOrder(models.Model):
                 continue
             order._add_supplier_to_product()
             # Deal with double validation process
-            if order.company_id.po_double_validation == 'one_step':
-                order.button_approve(force=True)
+            if order.company_id.po_double_validation == 'one_step'\
+                    or (order.company_id.po_double_validation == 'two_step'\
+                        and order.amount_total < self.env.user.company_id.currency_id.compute(order.company_id.po_double_validation_amount, order.currency_id))\
+                    or order.user_has_groups('purchase.group_purchase_manager'):
+                order.button_approve()
             else:
                 order.write({'state': 'to approve'})
         return True
@@ -1065,12 +1065,9 @@ class ProductProduct(models.Model):
             ('state', 'in', ['purchase', 'done']),
             ('product_id', 'in', self.mapped('id')),
         ]
-        r = {}
-        for group in self.env['purchase.report'].read_group(domain, ['product_id', 'unit_quantity'], ['product_id']):
-            r[group['product_id'][0]] = group['unit_quantity']
+        PurchaseOrderLines = self.env['purchase.order.line'].search(domain)
         for product in self:
-            product.purchase_count = r.get(product.id, 0)
-        return True
+            product.purchase_count = len(PurchaseOrderLines.filtered(lambda r: r.product_id == product).mapped('order_id'))
 
     purchase_count = fields.Integer(compute='_purchase_count', string='# Purchases')
 

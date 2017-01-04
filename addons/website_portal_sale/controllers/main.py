@@ -27,6 +27,7 @@ class website_account(website_account):
             ('state', 'in', ['sale', 'done'])
         ])
         invoice_count = Invoice.search_count([
+            ('type', 'in', ['out_invoice', 'out_refund']),
             ('message_partner_ids', 'child_of', [partner.commercial_partner_id.id]),
             ('state', 'in', ['open', 'paid', 'cancelled'])
         ])
@@ -39,7 +40,7 @@ class website_account(website_account):
         return response
 
     #
-    # Quotations and Sale Orders
+    # Quotations and Sales Orders
     #
 
     @http.route(['/my/quotes', '/my/quotes/page/<int:page>'], type='http', auth="user", website=True)
@@ -166,6 +167,7 @@ class website_account(website_account):
         AccountInvoice = request.env['account.invoice']
 
         domain = [
+            ('type', 'in', ['out_invoice', 'out_refund']),
             ('message_partner_ids', 'child_of', [partner.commercial_partner_id.id]),
             ('state', 'in', ['open', 'paid', 'cancelled'])
         ]

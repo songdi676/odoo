@@ -15,7 +15,7 @@
             <field name="lang">${object.partner_id.lang}</field>
             <field name="body_html"><![CDATA[
 <p>Dear ${object.partner_id.name}
-% set access_action = object.get_access_action()
+% set access_action = object.with_context(force_website=True).get_access_action()
 % set doc_name = 'quotation' if object.state in ('draft', 'sent') else 'order confirmation'
 % set is_online = access_action and access_action['type'] == 'ir.actions.act_url'
 % set access_name = is_online and object.template_id and 'Accept and pay %s online' % doc_name or 'View %s' % doc_name
@@ -47,7 +47,7 @@ from ${object.company_id.name}.
 <p>You can reply to this email if you have any questions.</p>
 <p>Thank you,</p>
 
-<p style="color:#eeeeee;">
+<p style="color:#888888;">
 % if object.user_id and object.user_id.signature:
     ${object.user_id.signature | safe}
 % endif
@@ -57,7 +57,7 @@ from ${object.company_id.name}.
 
         <!--Default Notification Email template for invoices-->
         <record id="sale.mail_template_data_notification_email_sale_order" model="mail.template">
-            <field name="name">Sale Order Notification Email</field>
+            <field name="name">Sales Order Notification Email</field>
             <field name="subject">${object.subject}</field>
             <field name="model_id" ref="mail.model_mail_message"/>
             <field name="auto_delete" eval="True"/>

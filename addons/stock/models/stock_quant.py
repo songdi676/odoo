@@ -559,10 +559,7 @@ class QuantPackage(models.Model):
     """ Packages containing quants and/or other packages """
     _name = "stock.quant.package"
     _description = "Physical Packages"
-    _parent_name = "parent_id"
-    _parent_store = True
-    _parent_order = 'name'
-    _order = 'parent_left'
+    _order = 'name'
 
     name = fields.Char(
         'Package Reference', copy=False, index=True,
@@ -575,19 +572,17 @@ class QuantPackage(models.Model):
     ancestor_ids = fields.One2many('stock.quant.package', string='Ancestors', compute='_compute_ancestor_ids')
     children_quant_ids = fields.One2many('stock.quant', string='All Bulk Content', compute='_compute_children_quant_ids')
     children_ids = fields.One2many('stock.quant.package', 'parent_id', 'Contained Packages', readonly=True)
-    parent_left = fields.Integer('Left Parent', index=True)
-    parent_right = fields.Integer('Right Parent', index=True)
     packaging_id = fields.Many2one(
         'product.packaging', 'Package Type', index=True,
         help="This field should be completed only if everything inside the package share the same product, otherwise it doesn't really makes sense.")
     location_id = fields.Many2one(
-        'stock.location', 'Location', compute='_compute_package_info',
+        'stock.location', 'Location', compute='_compute_package_info', search='_search_location',
         index=True, readonly=True)
     company_id = fields.Many2one(
-        'res.company', 'Company', compute='_compute_package_info',
+        'res.company', 'Company', compute='_compute_package_info', search='_search_company',
         index=True, readonly=True)
     owner_id = fields.Many2one(
-        'res.partner', 'Owner', compute='_compute_package_info',
+        'res.partner', 'Owner', compute='_compute_package_info', search='_search_owner',
         index=True, readonly=True)
 
     @api.one
@@ -595,11 +590,12 @@ class QuantPackage(models.Model):
     def _compute_ancestor_ids(self):
         self.ancestor_ids = self.env['stock.quant.package'].search(['id', 'parent_of', self.id]).ids
 
-    @api.one
+    @api.multi
     @api.depends('parent_id', 'children_ids', 'quant_ids.package_id')
     def _compute_children_quant_ids(self):
         for package in self:
-            package.children_quant_ids = self.env['stock.quant'].search([('package_id', 'child_of', package.id)]).ids
+            if package.id:
+                package.children_quant_ids = self.env['stock.quant'].search([('package_id', 'child_of', package.id)]).ids
 
     @api.depends('quant_ids.package_id', 'quant_ids.location_id', 'quant_ids.company_id', 'quant_ids.owner_id', 'ancestor_ids')
     def _compute_package_info(self):
@@ -629,6 +625,36 @@ class QuantPackage(models.Model):
             res[package.id] = name
         return res
 
+    def _search_location(self, operator, value):
+        if value:
+            packs = self.search([('quant_ids.location_id', operator, value)])
+        else:
+            packs = self.search([('quant_ids', operator, value)])
+        if packs:
+            return [('id', 'parent_of', packs.ids)]
+        else:
+            return [('id', '=', False)]
+
+    def _search_company(self, operator, value):
+        if value:
+            packs = self.search([('quant_ids.company_id', operator, value)])
+        else:
+            packs = self.search([('quant_ids', operator, value)])
+        if packs:
+            return [('id', 'parent_of', packs.ids)]
+        else:
+            return [('id', '=', False)]
+
+    def _search_owner(self, operator, value):
+        if value:
+            packs = self.search([('quant_ids.owner_id', operator, value)])
+        else:
+            packs = self.search([('quant_ids', operator, value)])
+        if packs:
+            return [('id', 'parent_of', packs.ids)]
+        else:
+            return [('id', '=', False)]
+
     def _check_location_constraint(self):
         '''checks that all quants in a package are stored in the same location. This function cannot be used
            as a constraint because it needs to be checked on pack operations (they may not call write on the
@@ -649,7 +675,6 @@ class QuantPackage(models.Model):
             # TDE FIXME: why superuser ?
             package.mapped('quant_ids').sudo().write({'package_id': package.parent_id.id})
             package.mapped('children_ids').write({'parent_id': package.parent_id.id})
-        self.unlink()
         return self.env['ir.actions.act_window'].for_xml_id('stock', 'action_package_view')
 
     def action_view_picking(self):

@@ -131,7 +131,7 @@ class Attendee(models.Model):
         """
         res = False
 
-        if self.env['ir.config_parameter'].get_param('calendar.block_mail') or self._context.get("no_mail_to_attendees"):
+        if self.env['ir.config_parameter'].sudo().get_param('calendar.block_mail') or self._context.get("no_mail_to_attendees"):
             return res
 
         calendar_view = self.env.ref('calendar.view_calendar_event_calendar')
@@ -152,7 +152,7 @@ class Attendee(models.Model):
             'color': colors,
             'action_id': self.env['ir.actions.act_window'].search([('view_id', '=', calendar_view.id)], limit=1).id,
             'dbname': self._cr.dbname,
-            'base_url': self.env['ir.config_parameter'].get_param('web.base.url', default='http://localhost:8069')
+            'base_url': self.env['ir.config_parameter'].sudo().get_param('web.base.url', default='http://localhost:8069')
         })
         invitation_template = invitation_template.with_context(rendering_context)
 
@@ -509,7 +509,7 @@ class Meeting(models.Model):
     _name = 'calendar.event'
     _description = "Event"
     _order = "id desc"
-    _inherit = ["mail.thread", "ir.needaction_mixin"]
+    _inherit = ["mail.thread"]
 
     @api.model
     def _default_partners(self):
@@ -552,15 +552,15 @@ class Meeting(models.Model):
     def _get_recurrency_end_date(self):
         """ Return the last date a recurring event happens, according to its end_type. """
         self.ensure_one()
-        data = self.read(['final_date', 'recurrency', 'rrule_type', 'count', 'end_type', 'stop'])[0]
+        data = self.read(['final_date', 'recurrency', 'rrule_type', 'count', 'end_type', 'stop', 'interval'])[0]
 
         if not data.get('recurrency'):
             return False
 
         end_type = data.get('end_type')
         final_date = data.get('final_date')
-        if end_type == 'count' and all(data.get(key) for key in ['count', 'rrule_type', 'stop']):
-            count = data['count'] + 1
+        if end_type == 'count' and all(data.get(key) for key in ['count', 'rrule_type', 'stop', 'interval']):
+            count = (data['count'] + 1) * data['interval']
             delay, mult = {
                 'daily': ('days', 1),
                 'weekly': ('days', 7),
@@ -1079,7 +1079,7 @@ class Meeting(models.Model):
                 if self.month_by == 'date' and (self.day < 1 or self.day > 31):
                     raise UserError(_("Please select a proper day of the month."))
 
-                if self.month_by == 'day':  # Eg : Second Monday of the month
+                if self.month_by == 'day' and self.byday and self.week_list:  # Eg : Second Monday of the month
                     return ';BYDAY=' + self.byday + self.week_list
                 elif self.month_by == 'date':  # Eg : 16th of the month
                     return ';BYMONTHDAY=' + str(self.day)
@@ -1142,7 +1142,7 @@ class Meeting(models.Model):
             data['rrule_type'] = 'monthly'
 
         if rule._bymonthday:
-            data['day'] = rule._bymonthday[0]
+            data['day'] = list(rule._bymonthday)[0]
             data['month_by'] = 'date'
             data['rrule_type'] = 'monthly'
 
@@ -1255,15 +1255,6 @@ class Meeting(models.Model):
     ####################################################
     # Messaging
     ####################################################
-
-    # shows events of the day for this user
-    @api.model
-    def _needaction_domain_get(self):
-        return [
-            ('stop', '<=', time.strftime(DEFAULT_SERVER_DATE_FORMAT + ' 23:59:59')),
-            ('start', '>=', time.strftime(DEFAULT_SERVER_DATE_FORMAT + ' 00:00:00')),
-            ('user_id', '=', self.env.user.id),
-        ]
 
     @api.multi
     def _get_message_unread(self):
