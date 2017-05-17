@@ -178,7 +178,7 @@ class PushedFlow(models.Model):
     company_id = fields.Many2one(
         'res.company', 'Company',
         default=lambda self: self.env['res.company']._company_default_get('procurement.order'), index=True)
-    route_id = fields.Many2one('stock.location.route', 'Route')
+    route_id = fields.Many2one('stock.location.route', 'Route', required=True, ondelete='cascade')
     location_from_id = fields.Many2one(
         'stock.location', 'Source Location', index=True, ondelete='cascade', required=True,
         help="This rule can be applied when a move is confirmed that has this location as destination location")
@@ -187,8 +187,8 @@ class PushedFlow(models.Model):
         help="The new location where the goods need to go")
     delay = fields.Integer('Delay (days)', default=0, help="Number of days needed to transfer the goods")
     picking_type_id = fields.Many2one(
-        'stock.picking.type', 'Picking Type', required=True,
-        help="This is the picking type that will be put on the stock moves")
+        'stock.picking.type', 'Operation Type', required=True,
+        help="This is the operation type that will be put on the stock moves")
     auto = fields.Selection([
         ('manual', 'Manual Operation'),
         ('transparent', 'Automatic No Step Added')], string='Automatic Move',
@@ -213,9 +213,15 @@ class PushedFlow(models.Model):
                 # TDE FIXME: should probably be done in the move model IMO
                 move._push_apply()
         else:
-            new_move = move.copy({
-                'origin': move.origin or move.picking_id.name or "/",
-                'location_id': move.location_dest_id.id,
+            new_move_vals = self._prepare_move_copy_values(move, new_date)
+            new_move = move.copy(new_move_vals)
+            move.write({'move_dest_id': new_move.id})
+            new_move.action_confirm()
+
+    def _prepare_move_copy_values(self, move_to_copy, new_date):
+        new_move_vals = {
+                'origin': move_to_copy.origin or move_to_copy.picking_id.name or "/",
+                'location_id': move_to_copy.location_dest_id.id,
                 'location_dest_id': self.location_dest_id.id,
                 'date': new_date,
                 'date_expected': new_date,
@@ -226,6 +232,6 @@ class PushedFlow(models.Model):
                 'push_rule_id': self.id,
                 'warehouse_id': self.warehouse_id.id,
                 'procurement_id': False,
-            })
-            move.write({'move_dest_id': new_move.id})
-            new_move.action_confirm()
+            }
+
+        return new_move_vals

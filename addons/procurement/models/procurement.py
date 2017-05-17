@@ -103,7 +103,7 @@ class ProcurementOrder(models.Model):
     group_id = fields.Many2one('procurement.group', 'Procurement Group')
     rule_id = fields.Many2one(
         'procurement.rule', 'Rule',
-        track_visibility='onchange',
+        track_visibility='onchange', ondelete='restrict',
         help="Chosen rule for the procurement resolution. Usually chosen by the system but can be manually set by the procurement manager to force an unusual behavior.")
 
     product_id = fields.Many2one(
@@ -289,12 +289,11 @@ class ProcurementOrder(models.Model):
             This is appropriate for batch jobs only.
         @return:  Dictionary of values
         '''
-        ProcurementSudo = self.env['procurement.order'].sudo()
         try:
             if use_new_cursor:
                 cr = registry(self._cr.dbname).cursor()
                 self = self.with_env(self.env(cr=cr))  # TDE FIXME
-
+            ProcurementSudo = self.env['procurement.order'].sudo()
             # Run confirmed procurements
             procurements = ProcurementSudo.search([('state', '=', 'confirmed')] + (company_id and [('company_id', '=', company_id)] or []))
             while procurements:

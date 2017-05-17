@@ -10,7 +10,7 @@ from psycopg2 import IntegrityError
 
 from odoo import http
 from odoo.http import request
-from odoo.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
+from odoo.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, pycompat
 from odoo.tools.translate import _
 from odoo.exceptions import ValidationError
 from odoo.addons.base.ir.ir_qweb.fields import nl2br
@@ -28,7 +28,7 @@ class WebsiteForm(http.Controller):
         try:
             data = self.extract_data(model_record, request.params)
         # If we encounter an issue while extracting data
-        except ValidationError, e:
+        except ValidationError as e:
             # I couldn't find a cleaner way to pass data to an exception
             return json.dumps({'error_fields' : e.args[0]})
 
@@ -43,8 +43,9 @@ class WebsiteForm(http.Controller):
         except IntegrityError:
             return json.dumps(False)
 
+        request.session['form_builder_model_model'] = model_record.model
         request.session['form_builder_model'] = model_record.name
-        request.session['form_builder_id']    = id_record
+        request.session['form_builder_id'] = id_record
 
         return json.dumps({'id': id_record})
 
@@ -117,7 +118,7 @@ class WebsiteForm(http.Controller):
         error_fields = []
 
 
-        for field_name, field_value in values.items():
+        for field_name, field_value in pycompat.items(values):
             # If the value of the field if a file
             if hasattr(field_value, 'filename'):
                 # Undo file upload field name indexing
@@ -159,18 +160,18 @@ class WebsiteForm(http.Controller):
         # def website_form_input_filter(self, values):
         #     values['name'] = '%s\'s Application' % values['partner_name']
         #     return values
-        dest_model = request.env[model.model]
+        dest_model = request.env[model.sudo().model]
         if hasattr(dest_model, "website_form_input_filter"):
             data['record'] = dest_model.website_form_input_filter(request, data['record'])
 
-        missing_required_fields = [label for label, field in authorized_fields.iteritems() if field['required'] and not label in data['record']]
+        missing_required_fields = [label for label, field in pycompat.items(authorized_fields) if field['required'] and not label in data['record']]
         if any(error_fields):
             raise ValidationError(error_fields + missing_required_fields)
 
         return data
 
     def insert_record(self, request, model, values, custom, meta=None):
-        record = request.env[model.model].sudo().create(values)
+        record = request.env[model.model].sudo().with_context(mail_create_nosubscribe=True).create(values)
 
         if custom or meta:
             default_field = model.website_form_default_field_id

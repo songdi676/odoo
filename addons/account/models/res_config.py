@@ -14,6 +14,12 @@ class AccountConfigSettings(models.TransientModel):
         default=lambda self: self.env.user.company_id)
     currency_id = fields.Many2one('res.currency', related="company_id.currency_id", required=True,
         string='Currency', help="Main currency of the company.")
+    currency_exchange_journal_id = fields.Many2one(
+        'account.journal',
+        related='company_id.currency_exchange_journal_id',
+        string="Exchange Gain or Loss Journal",
+        domain=[('type', '=', 'general')],
+        help='The accounting journal where automatic exchange differences will be registered')
     has_chart_of_accounts = fields.Boolean(compute='_compute_has_chart_of_accounts', string='Company has a chart of accounts')
     chart_template_id = fields.Many2one('account.chart.template', string='Template',
         domain="[('visible','=', True)]")
@@ -32,18 +38,11 @@ class AccountConfigSettings(models.TransientModel):
     module_account_deferred_revenue = fields.Boolean(string="Revenue Recognition")
     module_account_budget = fields.Boolean(string='Budget Management')
     module_account_reports = fields.Boolean("Dynamic Reports")
-    group_proforma_invoices = fields.Boolean(string='Allow pro-forma invoices',
-        implied_group='account.group_proforma_invoices',
-        help="Allows you to put invoices in pro-forma state.")
     module_account_reports_followup = fields.Boolean("Enable payment followup management")
-    tax_cash_basis_journal_id = fields.Many2one(
-        'account.journal',
-        related='company_id.tax_cash_basis_journal_id',
-        string="Tax Cash Basis Journal",)
     default_sale_tax_id = fields.Many2one('account.tax', string="Default Sale Tax",
-        default_model="account.config.settings", company_dependent=True, oldname="default_sale_tax")
+        company_dependent=True, oldname="default_sale_tax")
     default_purchase_tax_id = fields.Many2one('account.tax', string="Default Purchase Tax",
-        default_model="account.config.settings", company_dependent=True, oldname="default_purchase_tax")
+        company_dependent=True, oldname="default_purchase_tax")
     module_l10n_us_check_printing = fields.Boolean("Allow check printing and deposits")
     module_account_batch_deposit = fields.Boolean(string='Use batch deposit',
         help='This allows you to group received checks before you deposit them to the bank.\n'
@@ -60,9 +59,19 @@ class AccountConfigSettings(models.TransientModel):
     module_product_margin = fields.Boolean(string="Allow Product Margin")
     module_l10n_eu_service = fields.Boolean(string="EU Digital Goods VAT")
 
+    @api.model
+    def get_default_tax_fields(self, fields):
+        default_purchase_tax_id = self.env['ir.config_parameter'].sudo().get_param('account.default_purchase_tax_id', default=False)
+        default_sale_tax_id = self.env['ir.config_parameter'].sudo().get_param('account.default_sale_tax_id', default=False)
+        return dict(default_purchase_tax_id=int(default_purchase_tax_id), default_sale_tax_id=int(default_sale_tax_id))
+
+    @api.multi
+    def set_default_tax_fields(self):
+        self.env['ir.config_parameter'].sudo().set_param("account.default_purchase_tax_id", self.default_purchase_tax_id.id)
+        self.env['ir.config_parameter'].sudo().set_param("account.default_sale_tax_id", self.default_sale_tax_id.id)
+
     @api.depends('company_id')
     def _compute_has_chart_of_accounts(self):
-        # import pdb; pdb.set_trace()
         self.has_chart_of_accounts = bool(self.company_id.chart_template_id)
 
     def set_group_multi_currency(self):
@@ -72,7 +81,6 @@ class AccountConfigSettings(models.TransientModel):
 
     def set_default_product_taxes(self):
         """ Set the product taxes if they have changed """
-        # import pdb; pdb.set_trace()
         ir_values_obj = self.env['ir.values']
         if self.default_sale_tax_id:
             ir_values_obj.sudo().set_default('product.template', "taxes_id", [self.default_sale_tax_id.id], for_all_users=True, company_id=self.company_id.id)
@@ -114,3 +122,14 @@ class AccountConfigSettings(models.TransientModel):
     def onchange_account_yodlee(self):
         if self.module_account_yodlee:
             self.module_account_plaid = True
+
+    @api.model
+    def create(self, values):
+        # Optimisation purpose, saving a res_config even without changing any values will trigger the write of all
+        # related values, including the currency_id field on res_company. This in turn will trigger the recomputation
+        # of account_move_line related field company_currency_id which can be slow depending on the number of entries 
+        # in the database. Thus, if we do not explicitely change the currency_id, we should not write it on the company
+        if ('company_id' in values and 'currency_id' in values):
+            if self.env['res.company'].browse(values.get('company_id')).currency_id.id == values.get('currency_id'):
+                values.pop('currency_id')
+        return super(AccountConfigSettings, self).create(values)

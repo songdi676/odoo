@@ -10,10 +10,11 @@ import time
 import odoo
 from odoo.exceptions import UserError, ValidationError, QWebException
 from odoo.models import check_method_name
+from odoo.tools import pycompat
 from odoo.tools.translate import translate
 from odoo.tools.translate import _
 
-import security
+from . import security
 
 _logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ def dispatch(method, params):
     security.check(db,uid,passwd)
     registry = odoo.registry(db).check_signaling()
     fn = globals()[method]
-    res = fn(db, uid, *params)
-    registry.signal_caches_change()
+    with registry.manage_changes():
+        res = fn(db, uid, *params)
     return res
 
 def check(f):
@@ -63,7 +64,7 @@ def check(f):
 
 
             uid = 1
-            if args and isinstance(args[0], (long, int)):
+            if args and isinstance(args[0], pycompat.integer_types):
                 uid = args[0]
 
             lang = ctx and ctx.get('lang')
@@ -83,7 +84,7 @@ def check(f):
                     if args and len(args) > 1:
                         # TODO self doesn't exist, but was already wrong before (it was not a registry but just the object_service.
                         obj = self.get(args[1])
-                        if len(args) > 3 and isinstance(args[3], (long, int, list)):
+                        if len(args) > 3 and isinstance(args[3], (pycompat.integer_types, list)):
                             ids = args[3]
                         else:
                             ids = []
@@ -134,9 +135,9 @@ def check(f):
                 tries += 1
                 _logger.info("%s, retry %d/%d in %.04f sec..." % (errorcodes.lookup(e.pgcode), tries, MAX_TRIES_ON_CONCURRENCY_FAILURE, wait_time))
                 time.sleep(wait_time)
-            except IntegrityError, inst:
+            except IntegrityError as inst:
                 registry = odoo.registry(dbname)
-                for key in registry._sql_error.keys():
+                for key in pycompat.keys(registry._sql_error):
                     if key in inst[0]:
                         raise ValidationError(tr(registry._sql_error[key], 'sql_constraint') or inst[0])
                 if inst.pgcode in (errorcodes.NOT_NULL_VIOLATION, errorcodes.FOREIGN_KEY_VIOLATION, errorcodes.RESTRICT_VIOLATION):

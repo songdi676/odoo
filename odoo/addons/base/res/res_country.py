@@ -37,7 +37,7 @@ class Country(models.Model):
     code = fields.Char(
         string='Country Code', size=2,
         help='The ISO country code in two chars. \nYou can use this field for quick search.')
-    address_format = fields.Text(
+    address_format = fields.Text(string="Layout in Reports",
         help="Display format to use for addresses belonging to this country.\n\n"
              "You can use python-style string pattern with all the fields of the address "
              "(for example, use '%(street)s' to display the field 'street') plus"
@@ -47,7 +47,7 @@ class Country(models.Model):
              "\n%(country_code)s: the code of the country",
         default='%(street)s\n%(street2)s\n%(city)s %(state_code)s %(zip)s\n%(country_name)s')
     address_view_id = fields.Many2one(
-        comodel_name='ir.ui.view', string="Address View",
+        comodel_name='ir.ui.view', string="Input View",
         domain=[('model', '=', 'res.partner'), ('type', '=', 'form')],
         help="Use this field if you want to replace the usual way to encode a complete address. "
              "Note that the address_format field is used to modify the way to display addresses "
@@ -59,6 +59,11 @@ class Country(models.Model):
     country_group_ids = fields.Many2many('res.country.group', 'res_country_res_country_group_rel',
                          'res_country_id', 'res_country_group_id', string='Country Groups')
     state_ids = fields.One2many('res.country.state', 'country_id', string='States')
+    name_position = fields.Selection([
+            ('before', 'Before Address'),
+            ('after', 'After Address'),
+        ], string="Customer Name Position", default="before",
+        help="Determines where the customer/company name should be placed, i.e. after or before the address.")
 
     _sql_constraints = [
         ('name_uniq', 'unique (name)',
@@ -91,7 +96,7 @@ class CountryGroup(models.Model):
     _description = "Country Group"
     _name = 'res.country.group'
 
-    name = fields.Char(required=True)
+    name = fields.Char(required=True, translate=True)
     country_ids = fields.Many2many('res.country', 'res_country_res_country_group_rel',
                                    'res_country_group_id', 'res_country_id', string='Countries')
 

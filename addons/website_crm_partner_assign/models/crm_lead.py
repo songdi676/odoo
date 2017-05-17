@@ -5,6 +5,7 @@ import random
 
 from odoo.addons.base_geolocalize.models.res_partner import geo_find, geo_query_address
 from odoo import api, fields, models, _
+from odoo.tools import pycompat
 
 
 class CrmLead(models.Model):
@@ -44,7 +45,7 @@ class CrmLead(models.Model):
                 if lead.partner_assigned_id and lead.partner_assigned_id.user_id != lead.user_id:
                     salesmans_leads.setdefault(lead.partner_assigned_id.user_id.id, []).append(lead.id)
 
-        for salesman_id, leads_ids in salesmans_leads.items():
+        for salesman_id, leads_ids in pycompat.items(salesmans_leads):
             leads = self.browse(leads_ids)
             leads.write({'user_id': salesman_id})
             for lead in leads:
@@ -190,24 +191,22 @@ class CrmLead(models.Model):
 
     @api.multi
     def partner_interested(self, comment=False):
-        self.check_access_rights('write')
         message = _('<p>I am interested by this lead.</p>')
         if comment:
             message += '<p>%s</p>' % comment
         for lead in self:
             lead.message_post(body=message, subtype="mail.mt_note")
-            lead.sudo().convert_opportunity(lead.partner_id.id)
+            lead.sudo().convert_opportunity(lead.partner_id.id)  # sudo required to convert partner data
 
     @api.multi
     def partner_desinterested(self, comment=False, contacted=False, spam=False):
-        self.check_access_rights('write')
         if contacted:
             message = '<p>%s</p>' % _('I am not interested by this lead. I contacted the lead.')
         else:
             message = '<p>%s</p>' % _('I am not interested by this lead. I have not contacted the lead.')
         partner_ids = self.env['res.partner'].search(
             [('id', 'child_of', self.env.user.partner_id.commercial_partner_id.id)])
-        self.sudo().message_unsubscribe(partner_ids=partner_ids.ids)
+        self.message_unsubscribe(partner_ids=partner_ids.ids)
         if comment:
             message += '<p>%s</p>' % comment
         self.message_post(body=message, subtype="mail.mt_note")
@@ -220,38 +219,40 @@ class CrmLead(models.Model):
             if tag_spam and tag_spam not in self.tag_ids:
                 values['tag_ids'] = [(4, tag_spam.id, False)]
         if partner_ids:
-            values['partner_declined_ids'] = map(lambda p: (4, p, 0), partner_ids.ids)
+            values['partner_declined_ids'] = [(4, p, 0) for p in partner_ids.ids]
         self.sudo().write(values)
 
     @api.multi
     def update_lead_portal(self, values):
         self.check_access_rights('write')
-
         for lead in self:
             lead_values = {
                 'planned_revenue': values['planned_revenue'],
                 'probability': values['probability'],
                 'priority': values['priority'],
+                'date_deadline': values['date_deadline'] or False,
             }
             # As activities may belong to several users, only the current portal user activity
             # will be modified by the portal form. If no activity exist we create a new one instead
             # that we assign to the portal user.
+
             user_activity = lead.activity_ids.filtered(lambda activity: activity.user_id == self.env.user)[:1]
-            if user_activity:
-                user_activity.sudo().write({
-                    'activity_type_id': values['activity_type_id'],
-                    'summary': values['activity_summary'],
-                    'date_deadline': values['activity_date_deadline'],
-                })
-            else:
-                self.env['mail.activity'].sudo().create({
-                    'res_model_id': self.env.ref('crm.model_crm_lead').id,
-                    'res_id': lead.id,
-                    'user_id': self.env.user.id,
-                    'activity_type_id': values['activity_type_id'],
-                    'summary': values['activity_summary'],
-                    'date_deadline': values['activity_date_deadline'],
-                })
+            if values['activity_date_deadline']:
+                if user_activity:
+                    user_activity.sudo().write({
+                        'activity_type_id': values['activity_type_id'],
+                        'summary': values['activity_summary'],
+                        'date_deadline': values['activity_date_deadline'],
+                    })
+                else:
+                    self.env['mail.activity'].sudo().create({
+                        'res_model_id': self.env.ref('crm.model_crm_lead').id,
+                        'res_id': lead.id,
+                        'user_id': self.env.user.id,
+                        'activity_type_id': values['activity_type_id'],
+                        'summary': values['activity_summary'],
+                        'date_deadline': values['activity_date_deadline'],
+                    })
             lead.write(lead_values)
 
     @api.model

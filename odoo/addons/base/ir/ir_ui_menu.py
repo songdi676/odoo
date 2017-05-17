@@ -37,13 +37,13 @@ class IrUiMenu(models.Model):
                                       "If this field is empty, Odoo will compute visibility based on the related object's read access.")
     complete_name = fields.Char(compute='_compute_complete_name', string='Full Path')
     web_icon = fields.Char(string='Web Icon File')
-    action = fields.Reference(selection=[('ir.actions.report.xml', 'ir.actions.report.xml'),
+    action = fields.Reference(selection=[('ir.actions.report', 'ir.actions.report'),
                                          ('ir.actions.act_window', 'ir.actions.act_window'),
                                          ('ir.actions.act_url', 'ir.actions.act_url'),
                                          ('ir.actions.server', 'ir.actions.server'),
                                          ('ir.actions.client', 'ir.actions.client')])
 
-    web_icon_data = fields.Binary(string='Web Icon Image', compute="_compute_web_icon", store=True, attachment=True)
+    web_icon_data = fields.Binary(string='Web Icon Image', attachment=True)
 
     @api.depends('name', 'parent_id.complete_name')
     def _compute_complete_name(self):
@@ -55,21 +55,9 @@ class IrUiMenu(models.Model):
         if level <= 0:
             return '...'
         if self.parent_id:
-            return self.parent_id._get_full_name(level - 1) + MENU_ITEM_SEPARATOR + self.name
+            return self.parent_id._get_full_name(level - 1) + MENU_ITEM_SEPARATOR + (self.name or "")
         else:
             return self.name
-
-    @api.depends('web_icon')
-    def _compute_web_icon(self):
-        """ Returns the image associated to `web_icon`.
-            `web_icon` can either be:
-              - an image icon [module, path]
-              - a built icon [icon_class, icon_color, background_color]
-            and it only has to call `read_image` if it's an image.
-        """
-        for menu in self:
-            if menu.web_icon and len(menu.web_icon.split(',')) == 2:
-                menu.web_icon_data = self.read_image(menu.web_icon)
 
     def read_image(self, path):
         if not path:
@@ -111,10 +99,10 @@ class IrUiMenu(models.Model):
         access = self.env['ir.model.access']
         MODEL_GETTER = {
             'ir.actions.act_window': lambda action: action.res_model,
-            'ir.actions.report.xml': lambda action: action.model,
+            'ir.actions.report': lambda action: action.model,
             'ir.actions.server': lambda action: action.model_id.model,
         }
-        for menu in action_menus.sudo():
+        for menu in action_menus:
             get_model = MODEL_GETTER.get(menu.action._name)
             if not get_model or not get_model(menu.action) or \
                     access.check(get_model(menu.action), 'read', False):
@@ -145,9 +133,9 @@ class IrUiMenu(models.Model):
             if not self._context.get('ir.ui.menu.full_list'):
                 menus = menus._filter_visible_menus()
             if offset:
-                menus = menus[long(offset):]
+                menus = menus[offset:]
             if limit:
-                menus = menus[:long(limit)]
+                menus = menus[:limit]
         return len(menus) if count else menus
 
     @api.multi
@@ -157,12 +145,26 @@ class IrUiMenu(models.Model):
     @api.model
     def create(self, values):
         self.clear_caches()
+        if 'web_icon' in values:
+            values['web_icon_data'] = self._compute_web_icon_data(values.get('web_icon'))
         return super(IrUiMenu, self).create(values)
 
     @api.multi
     def write(self, values):
         self.clear_caches()
+        if 'web_icon' in values:
+            values['web_icon_data'] = self._compute_web_icon_data(values.get('web_icon'))
         return super(IrUiMenu, self).write(values)
+
+    def _compute_web_icon_data(self, web_icon):
+        """ Returns the image associated to `web_icon`.
+            `web_icon` can either be:
+              - an image icon [module, path]
+              - a built icon [icon_class, icon_color, background_color]
+            and it only has to call `read_image` if it's an image.
+        """
+        if web_icon and len(web_icon.split(',')) == 2:
+            return self.read_image(web_icon)
 
     @api.multi
     def unlink(self):

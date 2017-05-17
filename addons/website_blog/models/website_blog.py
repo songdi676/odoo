@@ -4,6 +4,8 @@
 from datetime import datetime
 import random
 
+import itertools
+
 from odoo import api, models, fields, _
 from odoo.addons.website.models.website import slug
 from odoo.tools.translate import html_translate
@@ -33,6 +35,7 @@ class Blog(models.Model):
         return res
 
     @api.multi
+    @api.returns('self', lambda value: value.id)
     def message_post(self, parent_id=False, subtype=None, **kwargs):
         """ Temporary workaround to avoid spam. If someone replies on a channel
         through the 'Presentation Published' email, it should be considered as a
@@ -164,7 +167,10 @@ class BlogPost(models.Model):
                 blog_post.teaser = blog_post.teaser_manual
             else:
                 content = html2plaintext(blog_post.content).replace('\n', ' ')
-                blog_post.teaser = ' '.join(filter(None, content.split(' '))[:50]) + '...'
+                blog_post.teaser = ' '.join(itertools.islice(
+                    (c for c in content.split(' ') if c),
+                    50
+                )) + '...'
 
     @api.multi
     def _set_teaser(self):
@@ -223,7 +229,7 @@ class BlogPost(models.Model):
             return super(BlogPost, self).get_access_action()
         return {
             'type': 'ir.actions.act_url',
-            'url': '/blog/%s/post/%s' % (self.blog_id.id, self.id),
+            'url': self.url,
             'target': 'self',
             'res_id': self.id,
         }

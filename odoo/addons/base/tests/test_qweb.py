@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-import cgi
 import collections
 import json
 import os.path
 import re
 
 from lxml import etree
-from itertools import chain
 
 from odoo.modules import get_module_resource
 from odoo.tests.common import TransactionCase
 from odoo.addons.base.ir.ir_qweb import QWebException
+from odoo.tools import pycompat, misc, ustr
 
 
 def dedent_and_strip(string):
@@ -47,12 +46,12 @@ class TestQWebTField(TransactionCase):
 
         result = self.engine.render(field, {'company': company})
         self.assertEqual(
-            result,
+            ustr(result),
             '<span data-oe-model="res.company" data-oe-id="%d" '
                   'data-oe-field="name" data-oe-type="char" '
                   'data-oe-expression="company.name">%s</span>' % (
                 company.id,
-                cgi.escape(s.encode('utf-8')),
+                misc.html_escape(s),
             ),
         )
 
@@ -165,6 +164,21 @@ class TestQWebNS(TransactionCase):
                 </h:table>
             </root>
         """
+
+        self.assertEquals(dedent_and_strip(view1.render()), dedent_and_strip(expected_result))
+
+    def test_render_static_xml_with_namespace_3(self):
+        expected_result = """
+            <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv32.xsd"></cfdi:Comprobante>
+        """
+
+        view1 = self.env['ir.ui.view'].create({
+            'name': "dummy",
+            'type': 'qweb',
+            'arch': """
+                <t t-name="base.dummy">%s</t>
+            """ % expected_result
+        })
 
         self.assertEquals(dedent_and_strip(view1.render()), dedent_and_strip(expected_result))
 
@@ -325,6 +339,36 @@ class TestQWebNS(TransactionCase):
 
         self.assertEquals(dedent_and_strip(view1.render(dict(version_id=1.0))), dedent_and_strip(expected_result))
 
+    def test_render_static_xml_with_namespaced_attributes(self):
+        view1 = self.env['ir.ui.view'].create({
+            'name': "dummy",
+            'type': 'qweb',
+            'arch': """
+                <t t-name="base.dummy">
+                    <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv32.xsd">abc</cfdi:Comprobante>
+                </t>
+            """
+        })
+
+        expected_result = """<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv32.xsd">abc</cfdi:Comprobante>"""
+
+        self.assertEquals(dedent_and_strip(view1.render()), dedent_and_strip(expected_result))
+
+    def test_render_dynamic_xml_with_namespaced_attributes(self):
+        view1 = self.env['ir.ui.view'].create({
+            'name': "dummy",
+            'type': 'qweb',
+            'arch': """
+                <t t-name="base.dummy">
+                    <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv32.xsd" t-esc="'abc'"/>
+                </t>
+            """
+        })
+
+        expected_result = """<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv32.xsd">abc</cfdi:Comprobante>"""
+
+        self.assertEquals(dedent_and_strip(view1.render()), dedent_and_strip(expected_result))
+
     def test_render_static_xml_with_t_call(self):
         view1 = self.env['ir.ui.view'].create({
             'name': "dummy",
@@ -366,7 +410,7 @@ class TestQWebNS(TransactionCase):
             'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
             'cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2'
         }
-        self.assertSetEqual(set(expected_ns.items()) - set(result_etree.nsmap.items()), set())
+        self.assertSetEqual(set(pycompat.items(expected_ns)) - set(pycompat.items(result_etree.nsmap)), set())
 
         # check that the t-call did its work
         cac_lines = result_etree.findall('.//cac:line', namespaces={'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'})

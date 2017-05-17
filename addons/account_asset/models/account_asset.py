@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
-from odoo.tools import DEFAULT_SERVER_DATE_FORMAT as DF
+from odoo.tools import DEFAULT_SERVER_DATE_FORMAT as DF, pycompat
 from odoo.tools import float_compare, float_is_zero
 
 
@@ -42,7 +42,10 @@ class AccountAssetCategory(models.Model):
 
     @api.onchange('account_asset_id')
     def onchange_account_asset(self):
-        self.account_depreciation_id = self.account_asset_id
+        if self.type == "purchase":
+            self.account_depreciation_id = self.account_asset_id
+        elif self.type == "sale":
+            self.account_depreciation_expense_id = self.account_asset_id
 
     @api.onchange('type')
     def onchange_type(self):
@@ -282,8 +285,7 @@ class AccountAssetAsset(models.Model):
             dummy, tracking_value_ids = asset._message_track(tracked_fields, dict.fromkeys(fields))
             asset.message_post(subject=_('Asset created'), tracking_value_ids=tracking_value_ids)
 
-    @api.multi
-    def set_to_close(self):
+    def _get_disposal_moves(self):
         move_ids = []
         for asset in self:
             unposted_depreciation_line_ids = asset.depreciation_line_ids.filtered(lambda x: not x.move_check)
@@ -315,6 +317,12 @@ class AccountAssetAsset(models.Model):
                 if changes:
                     asset.message_post(subject=_('Asset sold or disposed. Accounting entry awaiting for validation.'), tracking_value_ids=tracking_value_ids)
                 move_ids += asset.depreciation_line_ids[-1].create_move(post_move=False)
+
+        return move_ids
+
+    @api.multi
+    def set_to_close(self):
+        move_ids = self._get_disposal_moves()
         if move_ids:
             name = _('Disposal Move')
             view_mode = 'form'
@@ -366,7 +374,7 @@ class AccountAssetAsset(models.Model):
         vals = self.onchange_category_id_values(self.category_id.id)
         # We cannot use 'write' on an object that doesn't exist yet
         if vals:
-            for k, v in vals['value'].iteritems():
+            for k, v in pycompat.items(vals['value']):
                 setattr(self, k, v)
 
     def onchange_category_id_values(self, category_id):
@@ -468,15 +476,14 @@ class AccountAssetDepreciationLine(models.Model):
     @api.multi
     def create_move(self, post_move=True):
         created_moves = self.env['account.move']
+        prec = self.env['decimal.precision'].precision_get('Account')
         for line in self:
             category_id = line.asset_id.category_id
             depreciation_date = self.env.context.get('depreciation_date') or line.depreciation_date or fields.Date.context_today(self)
             company_currency = line.asset_id.company_id.currency_id
             current_currency = line.asset_id.currency_id
             amount = current_currency.compute(line.amount, company_currency)
-            sign = (category_id.journal_id.type == 'purchase' or category_id.journal_id.type == 'sale' and 1) or -1
             asset_name = line.asset_id.name + ' (%s/%s)' % (line.sequence, len(line.asset_id.depreciation_line_ids))
-            prec = self.env['decimal.precision'].precision_get('Account')
             move_line_1 = {
                 'name': asset_name,
                 'account_id': category_id.account_depreciation_id.id,
@@ -486,7 +493,7 @@ class AccountAssetDepreciationLine(models.Model):
                 'partner_id': line.asset_id.partner_id.id,
                 'analytic_account_id': category_id.account_analytic_id.id if category_id.type == 'sale' else False,
                 'currency_id': company_currency != current_currency and current_currency.id or False,
-                'amount_currency': company_currency != current_currency and - sign * line.amount or 0.0,
+                'amount_currency': company_currency != current_currency and - 1.0 * line.amount or 0.0,
             }
             move_line_2 = {
                 'name': asset_name,
@@ -497,7 +504,7 @@ class AccountAssetDepreciationLine(models.Model):
                 'partner_id': line.asset_id.partner_id.id,
                 'analytic_account_id': category_id.account_analytic_id.id if category_id.type == 'purchase' else False,
                 'currency_id': company_currency != current_currency and current_currency.id or False,
-                'amount_currency': company_currency != current_currency and sign * line.amount or 0.0,
+                'amount_currency': company_currency != current_currency and line.amount or 0.0,
             }
             move_vals = {
                 'ref': line.asset_id.code,
@@ -576,7 +583,7 @@ class AccountAssetDepreciationLine(models.Model):
             message = ''
             if message_description:
                 message = '<span>%s</span>' % message_description
-            for name, values in tracked_values.iteritems():
+            for name, values in pycompat.items(tracked_values):
                 message += '<div> &nbsp; &nbsp; &bull; <b>%s</b>: ' % name
                 message += '%s</div>' % values
             return message

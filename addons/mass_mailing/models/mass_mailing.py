@@ -4,13 +4,15 @@
 import hashlib
 import hmac
 from datetime import datetime
+import logging
 import random
 
-from odoo import api, fields, models, _
+from odoo import api, fields, models, tools, _
 from odoo.exceptions import UserError
 from odoo.tools.safe_eval import safe_eval
 from odoo.tools.translate import html_translate
 
+_logger = logging.getLogger(__name__)
 
 class MassMailingTag(models.Model):
     """Model of categories of mass mailing, i.e. marketing, newsletter, ... """
@@ -151,10 +153,10 @@ class MassMailingCampaign(models.Model):
     mass_mailing_ids = fields.One2many(
         'mail.mass_mailing', 'mass_mailing_campaign_id',
         string='Mass Mailings')
-    unique_ab_testing = fields.Boolean(string='AB Testing',
-        help='If checked, recipients will be mailed only once, allowing to send '
-             'various mailings in a single campaign to test the effectiveness '
-             'of the mailings.')
+    unique_ab_testing = fields.Boolean(string='Allow A/B Testing', default=True,
+        help='If checked, recipients will be mailed only once for the whole campaign. '
+             'This lets you send different mailings to randomly selected recipients and test '
+             'the effectiveness of the mailings, without causing duplicate messages.')
     color = fields.Integer(string='Color Index')
     clicks_ratio = fields.Integer(compute="_compute_clicks_ratio", string="Number of clicks")
     # stat fields
@@ -256,9 +258,9 @@ class MassMailingCampaign(models.Model):
             # Update standard results with default results
             result = []
             for state_value, state_name in states:
-                res = filter(lambda x: x['stage_id'] == (state_value, state_name), read_group_res)
+                res = [x for x in read_group_res if x['stage_id'] == (state_value, state_name)]
                 if not res:
-                    res = filter(lambda x: x['stage_id'] == state_value, read_group_all_states)
+                    res = [x for x in read_group_all_states if x['stage_id'] == state_value]
                 res[0]['stage_id'] = [state_value, state_name]
                 result.append(res[0])
             return result
@@ -427,7 +429,7 @@ class MassMailing(models.Model):
         """
         secret = self.env["ir.config_parameter"].sudo().get_param(
             "database.secret")
-        token = (self.env.cr.dbname, self.id, res_id, email)
+        token = (self.env.cr.dbname, self.id, int(res_id), tools.ustr(email))
         return hmac.new(str(secret), repr(token), hashlib.sha512).hexdigest()
 
     def _compute_next_departure(self):
@@ -454,13 +456,11 @@ class MassMailing(models.Model):
     def _onchange_model_and_list(self):
         if self.mailing_model == 'mail.mass_mailing.list':
             if self.contact_list_ids:
-                self.mailing_domain = "[('list_ids', 'in', [%s]), ('opt_out', '=', False)]" % (','.join(map(str,self.contact_list_ids.ids)),)
+                self.mailing_domain = "[('list_ids', 'in', [%s]), ('opt_out', '=', False)]" % (','.join(str(id) for id in self.contact_list_ids.ids),)
             else:
                 self.mailing_domain = "[(0, '=', 1)]"
-        elif 'opt_out' in self.env[self.mailing_model]._fields:
+        elif 'opt_out' in self.env[self.mailing_model]._fields and not self.mailing_domain:
             self.mailing_domain = "[('opt_out', '=', False)]"
-        else:
-            self.mailing_domain = []
         self.body_html = "on_change_model_and_list"
 
     #------------------------------------------------------
@@ -497,9 +497,9 @@ class MassMailing(models.Model):
             # Update standard results with default results
             result = []
             for state_value, state_name in states:
-                res = filter(lambda x: x['state'] == state_value, read_group_res)
+                res = [x for x in read_group_res if x['state'] == state_value]
                 if not res:
-                    res = filter(lambda x: x['state'] == state_value, read_group_all_states)
+                    res = [x for x in read_group_all_states if x['state'] == state_value]
                 res[0]['state'] = [state_value, state_name]
                 result.append(res[0])
             return result
@@ -507,7 +507,7 @@ class MassMailing(models.Model):
             return super(MassMailing, self).read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby)
 
     def update_opt_out(self, email, res_ids, value):
-        model = self.env[self.mailing_model_real]
+        model = self.env[self.mailing_model_real].with_context(active_test=False)
         if 'opt_out' in model._fields:
             email_fname = 'email_from'
             if 'email' in model._fields:
@@ -567,6 +567,69 @@ class MassMailing(models.Model):
     # Email Sending
     #------------------------------------------------------
 
+    def _get_blacklist(self):
+        """Returns a set of emails opted-out in target model"""
+        # TODO: implement a global blacklist table, to easily share
+        # it and update it.
+        self.ensure_one()
+        blacklist = {}
+        target = self.env[self.mailing_model_real]
+        mail_field = 'email' if 'email' in target._fields else 'email_from'
+        if 'opt_out' in target._fields:
+            # avoid loading a large number of records in memory
+            # + use a basic heuristic for extracting emails
+            query = """
+                SELECT lower(substring(%(mail_field)s, '([^ ,;<@]+@[^> ,;]+)'))
+                  FROM %(target)s
+                 WHERE opt_out AND
+                       substring(%(mail_field)s, '([^ ,;<@]+@[^> ,;]+)') IS NOT NULL;
+            """
+            query = query % {'target': target._table, 'mail_field': mail_field}
+            self._cr.execute(query)
+            blacklist = set(m[0] for m in self._cr.fetchall())
+            _logger.info(
+                "Mass-mailing %s targets %s, blacklist: %s emails",
+                self, target._name, len(blacklist))
+        else:
+            _logger.info("Mass-mailing %s targets %s, no blacklist available", self, target._name)
+        return blacklist
+
+    def _get_seen_list(self):
+        """Returns a set of emails already targeted by current mailing/campaign (no duplicates)"""
+        self.ensure_one()
+        target = self.env[self.mailing_model_real]
+        mail_field = 'email' if 'email' in target._fields else 'email_from'
+        # avoid loading a large number of records in memory
+        # + use a basic heuristic for extracting emails
+        query = """
+            SELECT lower(substring(%(mail_field)s, '([^ ,;<@]+@[^> ,;]+)'))
+              FROM mail_mail_statistics s
+              JOIN %(target)s t ON (s.res_id = t.id)
+             WHERE substring(%(mail_field)s, '([^ ,;<@]+@[^> ,;]+)') IS NOT NULL
+        """
+        if self.mass_mailing_campaign_id.unique_ab_testing:
+            query +="""
+               AND s.mass_mailing_campaign_id = %%(mailing_campaign_id)s;
+            """
+        else:
+            query +="""
+               AND s.mass_mailing_id = %%(mailing_id)s;
+            """
+        query = query % {'target': target._table, 'mail_field': mail_field}
+        params = {'mailing_id': self.id, 'mailing_campaign_id': self.mass_mailing_campaign_id.id}
+        self._cr.execute(query, params)
+        seen_list = set(m[0] for m in self._cr.fetchall())
+        _logger.info(
+            "Mass-mailing %s has already reached %s %s emails", self, len(seen_list), target._name)
+        return seen_list
+
+    def _get_mass_mailing_context(self):
+        """Returns extra context items with pre-filled blacklist and seen list for massmailing"""
+        return {
+            'mass_mailing_blacklist': self._get_blacklist(),
+            'mass_mailing_seen_list': self._get_seen_list(),
+        }
+
     def get_recipients(self):
         if self.mailing_domain:
             domain = safe_eval(self.mailing_domain)
@@ -625,7 +688,9 @@ class MassMailing(models.Model):
                 composer_values['reply_to'] = mailing.reply_to
 
             composer = self.env['mail.compose.message'].with_context(active_ids=res_ids).create(composer_values)
-            composer.with_context(active_ids=res_ids).send_mail(auto_commit=True)
+            extra_context = self._get_mass_mailing_context()
+            composer = composer.with_context(active_ids=res_ids, **extra_context)
+            composer.send_mail(auto_commit=True)
             mailing.state = 'done'
         return True
 

@@ -6,7 +6,7 @@
         <field name="inherit_id" ref="website.website_config_settings_view_form"/>
         <field name="arch" type="xml">
             <div id="msg_twitter_roller_install_setting" position="replace">
-                <div class="content-group">
+                <div class="content-group" attrs="{'invisible': [('module_website_twitter', '=', False)]}">
                     <div class="mt16">
                         <div class="row">
                             <label class="col-md-3 o_light_label" string="API Key" for="twitter_api_key"/>
@@ -38,8 +38,8 @@
                             </div>
                             <div class="modal-body">
                                 <ol>
-                                    <li>Create a new Twitter application on <a href="https://apps.twitter.com/app/new" target="new">
-                                            https://apps.twitter.com/app/new
+                                    <li>Create a new Twitter application on <a href="https://apps.twitter.com/" target="new">
+                                            https://apps.twitter.com/
                                         </a>
                                         with the following values:
                                        <ul>

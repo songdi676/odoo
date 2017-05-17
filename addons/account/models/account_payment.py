@@ -21,7 +21,7 @@ class account_payment_method(models.Model):
     _name = "account.payment.method"
     _description = "Payment Methods"
 
-    name = fields.Char(required=True)
+    name = fields.Char(required=True, translate=True)
     code = fields.Char(required=True)  # For internal identification
     payment_type = fields.Selection([('inbound', 'Inbound'), ('outbound', 'Outbound')], required=True)
 
@@ -81,7 +81,7 @@ class account_abstract_payment(models.AbstractModel):
 
     def _compute_total_invoices_amount(self):
         """ Compute the sum of the residual of invoices, expressed in the payment currency """
-        payment_currency = self.currency_id or self.journal_id.currency_id or self.journal_id.company_id.currency_id
+        payment_currency = self.currency_id or self.journal_id.currency_id or self.journal_id.company_id.currency_id or self.env.user.company_id.currency_id
         invoices = self._get_invoices()
 
         if all(inv.currency_id == payment_currency for inv in invoices):
@@ -170,7 +170,7 @@ class account_register_payments(models.TransientModel):
 
 class account_payment(models.Model):
     _name = "account.payment"
-    _inherit = 'account.abstract.payment'
+    _inherit = ['mail.thread', 'account.abstract.payment']
     _description = "Payments"
     _order = "payment_date desc, name desc"
 
@@ -178,6 +178,16 @@ class account_payment(models.Model):
     @api.depends('invoice_ids')
     def _get_has_invoices(self):
         self.has_invoices = bool(self.invoice_ids)
+
+    @api.multi
+    @api.depends('move_line_ids.reconciled')
+    def _get_move_reconciled(self):
+        for payment in self:
+            rec = True
+            for aml in payment.move_line_ids.filtered(lambda x: x.account_id.reconcile):
+                if not aml.reconciled:
+                    rec = False
+            payment.move_reconciled = rec
 
     @api.one
     @api.depends('invoice_ids', 'amount', 'payment_date', 'currency_id')
@@ -210,9 +220,27 @@ class account_payment(models.Model):
     payment_difference = fields.Monetary(compute='_compute_payment_difference', readonly=True)
     payment_difference_handling = fields.Selection([('open', 'Keep open'), ('reconcile', 'Mark invoice as fully paid')], default='open', string="Payment Difference", copy=False)
     writeoff_account_id = fields.Many2one('account.account', string="Difference Account", domain=[('deprecated', '=', False)], copy=False)
+    writeoff_label = fields.Char(
+        string='Journal Item Label',
+        help='Change label of the counterpart that will hold the payment difference',
+        default='Write-Off')
 
     # FIXME: ondelete='restrict' not working (eg. cancel a bank statement reconciliation with a payment)
     move_line_ids = fields.One2many('account.move.line', 'payment_id', readonly=True, copy=False, ondelete='restrict')
+    move_reconciled = fields.Boolean(compute="_get_move_reconciled", readonly=True)
+
+    def open_payment_matching_screen(self):
+        # Open reconciliation view for customers/suppliers
+        action_context = {'show_mode_selector': False, 'company_ids': [self.company_id.id], 'partner_ids': [self.partner_id.commercial_partner_id.id]}
+        if self.partner_type == 'customer':
+            action_context.update({'mode': 'customers'})
+        elif self.partner_type == 'supplier':
+            action_context.update({'mode': 'suppliers'})
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'manual_reconciliation_view',
+            'context': action_context,
+        }
 
     @api.one
     @api.depends('invoice_ids', 'payment_type', 'partner_type', 'partner_id')
@@ -402,10 +430,13 @@ class account_payment(models.Model):
             # to avoid loss of precision during the currency rate computations. See revision 20935462a0cabeb45480ce70114ff2f4e91eaf79 for a detailed example.
             total_residual_company_signed = sum(invoice.residual_company_signed for invoice in self.invoice_ids)
             total_payment_company_signed = self.currency_id.with_context(date=self.payment_date).compute(self.amount, self.company_id.currency_id)
-            amount_wo = total_residual_company_signed - total_payment_company_signed
+            if self.invoice_ids[0].type in ['in_invoice', 'out_refund']:
+                amount_wo = total_payment_company_signed - total_residual_company_signed
+            else:
+                amount_wo = total_residual_company_signed - total_payment_company_signed
             debit_wo = amount_wo > 0 and amount_wo or 0.0
             credit_wo = amount_wo < 0 and -amount_wo or 0.0
-            writeoff_line['name'] = _('Counterpart')
+            writeoff_line['name'] = self.writeoff_label
             writeoff_line['account_id'] = self.writeoff_account_id.id
             writeoff_line['debit'] = debit_wo
             writeoff_line['credit'] = credit_wo
@@ -500,10 +531,10 @@ class account_payment(models.Model):
                 if self.payment_type == 'inbound':
                     name += _("Customer Payment")
                 elif self.payment_type == 'outbound':
-                    name += _("Customer Refund")
+                    name += _("Customer Credit Note")
             elif self.partner_type == 'supplier':
                 if self.payment_type == 'inbound':
-                    name += _("Vendor Refund")
+                    name += _("Vendor Credit Note")
                 elif self.payment_type == 'outbound':
                     name += _("Vendor Payment")
             if invoice:

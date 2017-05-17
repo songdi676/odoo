@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import api, exceptions, models
+from odoo import api, exceptions, fields, models
 
 
 class SaleOrder(models.Model):
 
     _inherit = 'sale.order'
+
+    website_url = fields.Char('Website URL', compute='_website_url', help='The full URL to access the document through the website.')
+
+    def _website_url(self):
+        for so in self:
+            so.website_url = '/my/orders/%s' % (so.id)
 
     @api.multi
     def get_access_action(self):
@@ -55,3 +61,11 @@ class SaleOrder(models.Model):
             action='/mail/view',
             model=self._name,
             res_id=self.id)[self.partner_id.id]
+
+
+class SaleOrderLine(models.Model):
+
+    _inherit = 'sale.order.line'
+
+    # Non-stored related field to allow portal user to see the image of the product he has ordered
+    product_image = fields.Binary('Product Image', related="product_id.image", store=False)

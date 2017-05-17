@@ -338,7 +338,7 @@ Evaluation context
 A number of keys are available in the evaluation context of or surrounding
 server actions:
 
-``self``
+``model``
     the model object linked to the action via ``model_id``
 ``object``, ``obj``
     only available if ``active_model`` and ``active_id`` are provided (via
@@ -358,8 +358,8 @@ server actions:
 
 .. _reference/actions/report:
 
-Report Actions (``ir.actions.report.xml``)
-==========================================
+Report Actions (``ir.actions.report``)
+======================================
 
 Triggers the printing of a report
 

@@ -1,13 +1,12 @@
 odoo.define('mail.composer', function (require) {
 "use strict";
 
-var chat_manager = require('mail.chat_manager');
+var chat_mixin = require('mail.chat_mixin');
 var utils = require('mail.utils');
 
 var core = require('web.core');
 var data = require('web.data');
-var dom_utils = require('web.dom_utils');
-var Model = require('web.Model');
+var dom = require('web.dom');
 var session = require('web.session');
 var Widget = require('web.Widget');
 
@@ -130,7 +129,7 @@ var MentionManager = Widget.extend({
     get_listener_selection: function (delimiter) {
         var listener = _.findWhere(this.listeners, {delimiter: delimiter});
         if (listener) {
-            var input_mentions = this.composer.$input.val().match(new RegExp(delimiter+'[^ ]+', 'g'));
+            var input_mentions = this.composer.$input.val().match(new RegExp(delimiter+'[^ ]+(?= |&nbsp;)', 'g'));
             return this._validate_selection(listener.selection, input_mentions);
         }
         return [];
@@ -270,7 +269,7 @@ var MentionManager = Widget.extend({
         // create the regex of all mention's names
         var names = _.pluck(listener.selection, 'name');
         var escaped_names = _.map(names, function (str) {
-            return "("+_.str.escapeRegExp(listener.delimiter+str)+")";
+            return "("+_.str.escapeRegExp(listener.delimiter+str)+")(?= |&nbsp;)";
         });
         var regex_str = escaped_names.join('|');
         // extract matches
@@ -346,17 +345,18 @@ var MentionManager = Widget.extend({
 
 });
 
-var BasicComposer = Widget.extend({
+var BasicComposer = Widget.extend(chat_mixin, {
     template: "mail.ChatComposer",
-
     events: {
         "keydown .o_composer_input textarea": "on_keydown",
         "keyup .o_composer_input": "on_keyup",
-        "change input.o_form_input_file": "on_attachment_change",
+        "change input.o_input_file": "on_attachment_change",
         "click .o_composer_button_send": "send_message",
         "click .o_composer_button_add_attachment": "on_click_add_attachment",
         "click .o_attachment_delete": "on_attachment_delete",
     },
+    // RPCs done to fetch the mention suggestions are throttled with the following value
+    MENTION_THROTTLE: 200,
 
     init: function (parent, options) {
         this._super.apply(this, arguments);
@@ -417,9 +417,6 @@ var BasicComposer = Widget.extend({
 
         // Emojis
         this.emoji_container_classname = 'o_composer_emoji';
-
-        this.PartnerModel = new Model('res.partner');
-        this.ChannelModel = new Model('mail.channel');
     },
 
     start: function () {
@@ -432,7 +429,7 @@ var BasicComposer = Widget.extend({
             self.trigger('input_focused');
         });
         this.$input.val(this.options.default_body);
-        dom_utils.autoresize(this.$input, {parent: this, min_height: this.options.input_min_height});
+        dom.autoresize(this.$input, {parent: this, min_height: this.options.input_min_height});
 
         // Attachments
         $(window).on(this.fileupload_id, this.on_attachment_loaded);
@@ -444,7 +441,7 @@ var BasicComposer = Widget.extend({
             content: function() {
                 if (!self.$emojis) { // lazy rendering
                     self.$emojis = $(QWeb.render('mail.ChatComposer.emojis', {
-                        emojis: chat_manager.get_emojis(),
+                        emojis: self._getEmojis(),
                     }));
                     self.$emojis.filter('.o_mail_emoji').on('click', self, self.on_click_emoji_img);
                 }
@@ -512,7 +509,7 @@ var BasicComposer = Widget.extend({
 
     // Events
     on_click_add_attachment: function () {
-        this.$('input.o_form_input_file').click();
+        this.$('input.o_input_file').click();
         this.$input.focus();
     },
 
@@ -580,57 +577,58 @@ var BasicComposer = Widget.extend({
 
     // Attachments
     on_attachment_change: function(event) {
-        var $target = $(event.target);
-        if ($target.val() !== '') {
-            var filename = $target.val().replace(/.*[\\\/]/,'');
-            // if the files exits for this answer, delete the file before upload
-            var attachments = [];
-            for (var i in this.get('attachment_ids')) {
-                if ((this.get('attachment_ids')[i].filename || this.get('attachment_ids')[i].name) === filename) {
-                    if (this.get('attachment_ids')[i].upload) {
-                        return false;
-                    }
-                    this.AttachmentDataSet.unlink([this.get('attachment_ids')[i].id]);
-                } else {
-                    attachments.push(this.get('attachment_ids')[i]);
-                }
-            }
-            // submit filename
-            this.$('form.o_form_binary_form').submit();
-            this.$attachment_button.prop('disabled', true);
+        var self = this,
+            files = event.target.files,
+            attachments = self.get('attachment_ids');
 
-            attachments.push({
+        _.each(files, function(file){
+            var attachment = _.findWhere(attachments, {name: file.name});
+            // if the files already exits, delete the file before upload
+            if(attachment){
+                self.AttachmentDataSet.unlink([attachment.id]);
+                attachments = _.without(attachments, attachment);
+            }
+        });
+
+        this.$('form.o_form_binary_form').submit();
+        this.$attachment_button.prop('disabled', true);
+        var upload_attachments = _.map(files, function(file){
+            return {
                 'id': 0,
-                'name': filename,
-                'filename': filename,
+                'name': file.name,
+                'filename': file.name,
                 'url': '',
                 'upload': true,
                 'mimetype': '',
-            });
-            this.set('attachment_ids', attachments);
-        }
+            };
+        });
+        attachments = attachments.concat(upload_attachments);
+        this.set('attachment_ids', attachments);
     },
-    on_attachment_loaded: function(event, result) {
-        var attachment_ids = [];
-        if (result.error || !result.id ) {
-            this.do_warn(result.error);
-            attachment_ids = _.filter(this.get('attachment_ids'), function (val) { return !val.upload; });
-        } else {
-            _.each(this.get('attachment_ids'), function(a) {
-                if (a.filename === result.filename && a.upload) {
-                    attachment_ids.push({
-                        'id': result.id,
-                        'name': result.name || result.filename,
-                        'filename': result.filename,
-                        'mimetype': result.mimetype,
-                        'url': session.url('/web/content', {'id': result.id, download: true}),
+    on_attachment_loaded: function(event) {
+        var self = this,
+            attachments = this.get('attachment_ids'),
+            files = Array.prototype.slice.call(arguments, 1);
+
+        _.each(files, function(file){
+            if(file.error || !file.id){
+                this.do_warn(file.error);
+                attachments = _.filter(attachments, function (attachment) { return !attachment.upload; });
+            }else{
+                var attachment = _.findWhere(attachments, {filename: file.filename, upload: true});
+                if(attachment){
+                    attachments = _.without(attachments, attachment);
+                    attachments.push({
+                        'id': file.id,
+                        'name': file.name || file.filename,
+                        'filename': file.filename,
+                        'mimetype': file.mimetype,
+                        'url': session.url('/web/content', {'id': file.id, download: true}),
                     });
-                } else {
-                    attachment_ids.push(a);
                 }
-            });
-        }
-        this.set('attachment_ids', attachment_ids);
+            }
+        }.bind(this));
+        this.set('attachment_ids', attachments);
         this.$attachment_button.prop('disabled', false);
     },
     on_attachment_delete: function(event){
@@ -664,18 +662,20 @@ var BasicComposer = Widget.extend({
 
     // Mention
     mention_fetch_throttled: function (model, method, kwargs) {
+        var self = this;
         // Delays the execution of the RPC to prevent unnecessary RPCs when the user is still typing
         var def = $.Deferred();
         clearTimeout(this.mention_fetch_timer);
         this.mention_fetch_timer = setTimeout(function () {
-            return model.call(method, kwargs).then(function (results) {
-                def.resolve(results);
-            });
-        }, 200);
+            return self._rpc({model: model, method: method, kwargs: kwargs})
+                .then(function (results) {
+                    def.resolve(results);
+                });
+        }, this.MENTION_THROTTLE);
         return def;
     },
     mention_fetch_channels: function (search) {
-        return this.mention_fetch_throttled(this.ChannelModel, 'get_mention_suggestions', {
+        return this.mention_fetch_throttled('mail.channel', 'get_mention_suggestions', {
             limit: this.options.mention_fetch_limit,
             search: search,
         }).then(function (suggestions) {
@@ -705,7 +705,7 @@ var BasicComposer = Widget.extend({
             });
             if (!suggestions.length && !self.options.mention_partners_restricted) {
                 // no result found among prefetched partners, fetch other suggestions
-                suggestions = self.mention_fetch_throttled(self.PartnerModel, 'get_mention_suggestions', {
+                suggestions = self.mention_fetch_throttled('res.partner', 'get_mention_suggestions', {
                     limit: limit,
                     search: search,
                 });
@@ -718,7 +718,7 @@ var BasicComposer = Widget.extend({
         var def = $.Deferred();
         clearTimeout(this.canned_timeout);
         this.canned_timeout = setTimeout(function() {
-            var canned_responses = chat_manager.get_canned_responses();
+            var canned_responses = self._getCannedResponses();
             var matches = fuzzy.filter(utils.unaccent(search), _.pluck(canned_responses, 'source'));
             var indexes = _.pluck(matches.slice(0, self.options.mention_fetch_limit), 'index');
             def.resolve(_.map(indexes, function (i) {

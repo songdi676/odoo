@@ -5,12 +5,15 @@ import datetime
 import werkzeug
 
 from collections import OrderedDict
+from werkzeug.exceptions import NotFound
 
 from odoo import fields
 from odoo import http
 from odoo.http import request
 from odoo.addons.website.models.website import slug, unslug
 from odoo.addons.website_partner.controllers.main import WebsitePartnerPage
+
+from odoo.tools import pycompat
 from odoo.tools.translate import _
 
 from odoo.addons.website_portal.controllers.main import website_account
@@ -30,13 +33,15 @@ class WebsiteAccount(website_account):
             ('type', '=', 'opportunity')
         ]
 
-    @http.route()
-    def account(self, **kw):
-        response = super(WebsiteAccount, self).account(**kw)
+    def _prepare_portal_layout_values(self):
+        values = super(WebsiteAccount, self)._prepare_portal_layout_values()
         lead_count = request.env['crm.lead'].search_count(self.get_domain_my_lead(request.env.user))
         opp_count = request.env['crm.lead'].search_count(self.get_domain_my_opp(request.env.user))
-        response.qcontext.update({'lead_count': lead_count, 'opp_count': opp_count})
-        return response
+        values.update({
+            'lead_count': lead_count,
+            'opp_count': opp_count,
+        })
+        return values
 
     @http.route(['/my/leads', '/my/leads/page/<int:page>'], type='http', auth="user", website=True)
     def portal_my_leads(self, page=1, date_begin=None, date_end=None, sortby=None, **kw):
@@ -93,13 +98,13 @@ class WebsiteAccount(website_account):
         this_week_end_date = fields.Date.to_string(fields.Date.from_string(today) + datetime.timedelta(days=7))
 
         searchbar_filters = {
-            'all': {'label': _('All'), 'domain': []},
+            'all': {'label': _('Active'), 'domain': []},
             'today': {'label': _('Today Activities'), 'domain': [('activity_date_deadline', '=', today)]},
             'week': {'label': _('This Week Activities'),
                      'domain': [('activity_date_deadline', '>=', today), ('activity_date_deadline', '<=', this_week_end_date)]},
             'overdue': {'label': _('Overdue Activities'), 'domain': [('activity_date_deadline', '<', today)]},
-            'won': {'label': _('Won'), 'domain': [('stage_id.probability', '=', 100), ('stage_id.fold', '=', True)]},
-            'lost': {'label': _('Lost'), 'domain': [('active', '=', False)]},
+            'won': {'label': _('Won'), 'domain': [('stage_id.probability', '=', 100), ('stage_id.on_change', '=', True)]},
+            'lost': {'label': _('Lost'), 'domain': [('active', '=', False), ('probability', '=', 0)]},
         }
         searchbar_sortings = {
             'date': {'label': _('Newest'), 'order': 'create_date desc'},
@@ -118,6 +123,8 @@ class WebsiteAccount(website_account):
         if not filterby:
             filterby = 'all'
         domain += searchbar_filters[filterby]['domain']
+        if filterby == 'lost':
+            CrmLead = CrmLead.with_context(active_test=False)
 
         # archive groups - Default Group By 'create_date'
         archive_groups = self._get_archive_groups('crm.lead', domain)
@@ -144,21 +151,26 @@ class WebsiteAccount(website_account):
             'pager': pager,
             'searchbar_sortings': searchbar_sortings,
             'sortby': sortby,
-            'searchbar_filters': OrderedDict(sorted(searchbar_filters.items())),
+            'searchbar_filters': OrderedDict(sorted(pycompat.items(searchbar_filters))),
             'filterby': filterby,
         })
         return request.render("website_crm_partner_assign.portal_my_opportunities", values)
 
-    @http.route(['/my/lead/<model("crm.lead"):lead>'], type='http', auth="user", website=True)
-    def portal_my_lead(self, lead=None, **kw):
+    @http.route(['''/my/lead/<model('crm.lead', "[('type','=', 'lead')]"):lead>'''], type='http', auth="user", website=True)
+    def portal_my_lead(self, lead, **kw):
+        if lead.type != 'lead':
+            raise NotFound()
         return request.render("website_crm_partner_assign.portal_my_lead", {'lead': lead})
 
-    @http.route(['/my/opportunity/<model("crm.lead"):lead>'], type='http', auth="user", website=True)
-    def portal_my_opportunity(self, lead=None, **kw):
+    @http.route(['''/my/opportunity/<model('crm.lead', "[('type','=', 'opportunity')]"):opp>'''], type='http', auth="user", website=True)
+    def portal_my_opportunity(self, opp, **kw):
+        if opp.type != 'opportunity':
+            raise NotFound()
+
         return request.render(
             "website_crm_partner_assign.portal_my_opportunity", {
-                'opportunity': lead,
-                'user_activity': lead.activity_ids.filtered(lambda activity: activity.user_id == request.env.user)[:1],
+                'opportunity': opp,
+                'user_activity': opp.activity_ids.filtered(lambda activity: activity.user_id == request.env.user)[:1],
                 'stages': request.env['crm.stage'].search([('probability', '!=', '100')], order='sequence desc'),
                 'activity_types': request.env['mail.activity.type'].sudo().search([]),
                 'states': request.env['res.country.state'].sudo().search([]),
@@ -264,7 +276,7 @@ class WebsiteCrmPartnerAssign(WebsitePartnerPage):
             offset=pager['offset'], limit=self._references_per_page)
         partners = partner_ids.sudo()
 
-        google_map_partner_ids = ','.join(map(str, [p.id for p in partners]))
+        google_map_partner_ids = ','.join(str(p.id) for p in partners)
         google_maps_api_key = request.env['ir.config_parameter'].sudo().get_param('google_maps_api_key')
 
         values = {

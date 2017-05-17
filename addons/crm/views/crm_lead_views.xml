@@ -127,7 +127,7 @@
                 </sheet>
                 <div class="oe_chatter">
                     <field name="message_follower_ids" widget="mail_followers"/>
-                    <field name="message_ids" widget="mail_thread"/>
+                    <field name="message_ids" widget="mail_thread" options="{'post_refresh': 'recipients'}"/>
                 </div>
             </form>
         </field>
@@ -181,6 +181,45 @@
             </field>
         </record>
 
+        <record id="view_crm_lead_kanban" model="ir.ui.view">
+            <field name="name">crm.lead.kanban</field>
+            <field name="model">crm.lead</field>
+            <field name="arch" type="xml">
+                <kanban class="o_kanban_mobile">
+                    <field name="name"/>
+                    <field name="contact_name"/>
+                    <field name="priority"/>
+                    <field name="tag_ids"/>
+                    <field name="user_id"/>
+                    <field name="message_needaction_counter"/>
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div t-attf-class="oe_kanban_content oe_kanban_global_click">
+                                <div>
+                                    <field name="tag_ids"/>
+                                </div>
+                                <div>
+                                    <strong><span><field name="name"/></span></strong>
+                                </div>
+                                <div>
+                                    <span><field name="contact_name"/></span>
+                                </div>
+                                <div class="oe_kanban_bottom_left">
+                                    <field name="priority" widget="priority"/>
+                                    <t t-if="record.message_needaction_counter.raw_value">
+                                        <span class="oe_kanban_mail_new" title="Unread Messages"><i class="fa fa-comments"/><t t-raw="record.message_needaction_counter.raw_value"/></span>
+                                    </t>
+                                </div>
+                                <div class="oe_kanban_bottom_right">
+                                    <img t-att-src="kanban_image('res.users', 'image_small', record.user_id.raw_value)" t-att-title="record.user_id.value" width="24" height="24" class="oe_kanban_avatar pull-right"/>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
         <record  id="crm_case_calendar_view_leads" model="ir.ui.view">
             <field name="name">crm.lead.calendar.lead</field>
             <field name="model">crm.lead</field>
@@ -204,6 +243,8 @@
                             <group>
                                 <field name="name" string="Opportunity Title" placeholder="e.g. Customer Deal"/>
                                 <field name="partner_id"/>
+                                <field name="email_from" invisible="1"/>
+                                <field name="phone" invisible="1"/>
                                 <label for="planned_revenue"/>
                                 <div class="o_row">
                                     <field name="planned_revenue"/>
@@ -495,7 +536,7 @@
                     <div class="oe_chatter">
                         <field name="message_follower_ids" widget="mail_followers"/>
                         <field name="activity_ids" widget="mail_activity"/>
-                        <field name="message_ids" widget="mail_thread"/>
+                        <field name="message_ids" widget="mail_thread" options="{'post_refresh': 'recipients'}"/>
                     </div>
                 </form>
             </field>
@@ -563,8 +604,7 @@
                     <field name="probability"/>
                     <field name="lost_reason"/>
                     <separator/>
-                    <filter string="Won" name="won"
-                            domain="['&amp;', ('stage_id.probability', '=', 100), ('stage_id.fold', '=', True)]"/>
+                    <filter string="Unread Messages" name="message_needaction" domain="[('message_needaction','=',True)]"/>
                     <separator/>
                     <filter string="My Opportunities" name="assigned_to_me"
                             domain="[('user_id', '=', uid)]"
@@ -583,9 +623,13 @@
                     <filter string="Overdue Activities" name="activities_overdue"
                             domain="[('activity_ids.date_deadline', '&lt;', context_today().strftime('%Y-%m-%d'))]"
                             help="Show all opportunities for which the next action date is before today"/>
+                    <filter string="Overdue Opportunities" name="overdue_opp"
+                            domain="[('date_deadline', '&lt;', context_today().strftime('%Y-%m-%d'))]"
+                            help="Show all opportunities with a deadline for which the next action date is before today"/>
                     <separator/>
-                    <filter string="Unread Messages" name="message_needaction" domain="[('message_needaction','=',True)]"/>
                     <filter string="Lost" domain="[('active', '=', False)]"/>
+                    <filter string="Won" name="won"
+                            domain="[('stage_id.probability', '=', 100)]"/>
                     <group expand="0" string="Group By" colspan="16">
                         <filter string="Salesperson" context="{'group_by':'user_id'}"/>
                         <filter string="Sales Channel" context="{'group_by':'team_id'}"/>
@@ -667,7 +711,7 @@
             <field name="code">
 if record:
     action_values = env.ref('crm.crm_lead_lost_action').read()[0]
-    action_values.update({'context': context})
+    action_values.update({'context': env.context})
     action = action_values
             </field>
         </record>
@@ -692,7 +736,7 @@ if record:
         <record model="ir.actions.act_window" id="crm_lead_all_leads">
             <field name="name">Leads</field>
             <field name="res_model">crm.lead</field>
-            <field name="view_mode">tree,graph,pivot,calendar,form</field>
+            <field name="view_mode">tree,kanban,graph,pivot,calendar,form</field>
             <field name="domain">['|', ('type','=','lead'), ('type','=',False)]</field>
             <field name="view_id" ref="crm_case_tree_view_leads"/>
             <field name="search_view_id" ref="crm.view_crm_case_leads_filter"/>
@@ -810,6 +854,7 @@ if record:
         <menuitem
             id="menu_crm_opportunities"
             action="action_your_pipeline"
+            name="My Pipeline"
             parent="sales_team.menu_sales"
             sequence="4"/>
 
@@ -828,7 +873,7 @@ if record:
             <field name="context">{
                     'default_type': 'opportunity',
                     'default_user_id': uid,
-                    'search_default_assigned_to_me': 1
+                    'search_default_activities_my': 1
                 }
             </field>
             <field name="help" type="html">
@@ -869,8 +914,7 @@ if record:
             name="Lead Tags"
             action="crm_lead_tag_action"
             parent="menu_crm_config_lead"
-            sequence="1"
-            groups="base.group_no_one"/>
+            sequence="1"/>
 
         <!-- Configuration/Lead & Opporotunities/Lost Reasons Menu -->
         <record id="crm_lost_reason_action" model="ir.actions.act_window">
@@ -893,7 +937,6 @@ if record:
             id="menu_crm_lost_reason"
             action="crm_lost_reason_action"
             parent="menu_crm_config_lead"
-            sequence="6"
-            groups="base.group_no_one"/>
+            sequence="6"/>
 
 </odoo>

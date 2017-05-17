@@ -4,7 +4,7 @@ from operator import itemgetter
 import time
 
 from odoo import api, fields, models, _
-from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
+from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT, pycompat
 from odoo.exceptions import ValidationError
 from odoo.addons.base.res.res_partner import WARNING_MESSAGE, WARNING_HELP
 
@@ -72,7 +72,7 @@ class AccountFiscalPosition(models.Model):
         ref_dict = {}
         for line in self.account_ids:
             ref_dict[line.account_src_id] = line.account_dest_id
-        for key, acc in accounts.items():
+        for key, acc in list(pycompat.items(accounts)):
             if acc in ref_dict:
                 accounts[key] = ref_dict[acc]
         return accounts
@@ -200,7 +200,6 @@ class AccountFiscalPositionAccount(models.Model):
 class ResPartner(models.Model):
     _name = 'res.partner'
     _inherit = 'res.partner'
-    _description = 'Partner'
 
     @api.multi
     def _credit_debit_get(self):
@@ -246,7 +245,7 @@ class ResPartner(models.Model):
         res = self._cr.fetchall()
         if not res:
             return [('id', '=', '0')]
-        return [('id', 'in', map(itemgetter(0), res))]
+        return [('id', 'in', [r[0] for r in res])]
 
     @api.model
     def _credit_search(self, operator, operand):
@@ -293,7 +292,7 @@ class ResPartner(models.Model):
                 """ % where_clause
         self.env.cr.execute(query, where_clause_params)
         price_totals = self.env.cr.dictfetchall()
-        for partner, child_ids in all_partners_and_children.items():
+        for partner, child_ids in pycompat.items(all_partners_and_children):
             partner.total_invoiced = sum(price['total'] for price in price_totals if price['partner_id'] in child_ids)
 
     @api.multi
@@ -316,17 +315,6 @@ class ResPartner(models.Model):
         if overdue_only:
             domain += overdue_domain
         return domain
-
-    @api.multi
-    def _compute_issued_total(self):
-        """ Returns the issued total as will be displayed on partner view """
-        today = fields.Date.context_today(self)
-        for partner in self:
-            domain = partner.get_followup_lines_domain(today, overdue_only=True)
-            issued_total = 0
-            for aml in self.env['account.move.line'].search(domain):
-                issued_total += aml.amount_residual
-            partner.issued_total = issued_total
 
     @api.one
     def _compute_has_unreconciled_entries(self):
@@ -388,7 +376,6 @@ class ResPartner(models.Model):
 
     contracts_count = fields.Integer(compute='_journal_item_count', string="Contracts", type='integer')
     journal_item_count = fields.Integer(compute='_journal_item_count', string="Journal Items", type="integer")
-    issued_total = fields.Monetary(compute='_compute_issued_total', string="Journal Items")
     property_account_payable_id = fields.Many2one('account.account', company_dependent=True,
         string="Account Payable", oldname="property_account_payable",
         domain="[('internal_type', '=', 'payable'), ('deprecated', '=', False)]",
@@ -440,12 +427,3 @@ class ResPartner(models.Model):
         return super(ResPartner, self)._commercial_fields() + \
             ['debit_limit', 'property_account_payable_id', 'property_account_receivable_id', 'property_account_position_id',
              'property_payment_term_id', 'property_supplier_payment_term_id', 'last_time_entries_checked']
-
-    def open_partner_history(self):
-        '''
-        This function returns an action that display invoices/refunds made for the given partners.
-        '''
-        action = self.env.ref('account.action_invoice_refund_out_tree')
-        result = action.read()[0]
-        result['domain'] = [('partner_id', 'in', self.ids)]
-        return result

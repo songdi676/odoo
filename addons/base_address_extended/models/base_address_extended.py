@@ -5,7 +5,7 @@ import re
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
-
+from odoo.tools import pycompat
 
 STREET_FIELDS = ('street_name', 'street_number', 'street_number2')
 
@@ -90,9 +90,8 @@ class Partner(models.Model):
         street_fields = self.get_street_fields()
         for partner in self:
             if not partner.street:
-                partner.street_name = ''
-                partner.street_number = ''
-                partner.street_number2 = ''
+                for field in street_fields:
+                    partner[field] = ''
                 continue
 
             street_format = (partner.country_id.street_format or
@@ -136,5 +135,37 @@ class Partner(models.Model):
                 vals[field_name] = street_raw
             # assign the values to the fields
             # /!\ Note that a write(vals) would cause a recursion since it would bypass the cache
-            for k, v in vals.items():
+            for k, v in pycompat.items(vals):
                 partner[k] = v
+
+
+class Company(models.Model):
+    _inherit = 'res.company'
+
+    street_name = fields.Char('Street Name', compute='_compute_address',
+                              inverse='_inverse_street_name')
+    street_number = fields.Char('House Number', compute='_compute_address',
+                                inverse='_inverse_street_number')
+    street_number2 = fields.Char('Door Number', compute='_compute_address',
+                                 inverse='_inverse_street_number2')
+
+    def _get_company_address_fields(self, partner):
+        address_fields = super(Company, self)._get_company_address_fields(partner)
+        address_fields.update({
+            'street_name': partner.street_name,
+            'street_number': partner.street_number,
+            'street_number2': partner.street_number2,
+        })
+        return address_fields
+
+    def _inverse_street_name(self):
+        for company in self:
+            company.partner_id.street_name = company.street_name
+
+    def _inverse_street_number(self):
+        for company in self:
+            company.partner_id.street_number = company.street_number
+
+    def _inverse_street_number2(self):
+        for company in self:
+            company.partner_id.street_number2 = company.street_number2

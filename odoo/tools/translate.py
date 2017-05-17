@@ -20,10 +20,9 @@ from babel.messages import extract
 from lxml import etree
 
 import odoo
-from odoo.tools import config
-from odoo.tools.misc import file_open, get_iso_codes, SKIPPED_ELEMENT_TYPES
-from odoo.tools.osutil import walksymlinks
-from odoo import sql_db, SUPERUSER_ID
+from . import config, pycompat
+from .misc import file_open, get_iso_codes, SKIPPED_ELEMENT_TYPES
+from .osutil import walksymlinks
 
 _logger = logging.getLogger(__name__)
 
@@ -256,7 +255,7 @@ def translate_xml_node(node, callback, method, parser=None):
         append_content(result, translate_content(todo) if todo_has_text else todo)
 
         # translate the required attributes
-        for name, value in result.items():
+        for name, value in pycompat.items(result.attrib):
             if name in TRANSLATED_ATTRS:
                 result.set(name, translate_text(value) or value)
 
@@ -337,7 +336,7 @@ class GettextAlias(object):
         # find current DB based on thread/worker db name (see netsvc)
         db_name = getattr(threading.currentThread(), 'dbname', None)
         if db_name:
-            return sql_db.db_connect(db_name)
+            return odoo.sql_db.db_connect(db_name)
 
     def _get_cr(self, frame, allow_create=True):
         # try, in order: cr, cursor, self.env.cr, self.cr,
@@ -423,7 +422,7 @@ class GettextAlias(object):
                 cr, is_new_cr = self._get_cr(frame)
                 if cr:
                     # Try to use ir.translation to benefit from global cache if possible
-                    env = odoo.api.Environment(cr, SUPERUSER_ID, {})
+                    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
                     res = env['ir.translation']._get_source(None, ('code','sql_constraint'), lang, source)
                 else:
                     _logger.debug('no context cursor detected, skipping translation for "%r"', source)
@@ -533,7 +532,7 @@ class PoFile(object):
                         raise StopIteration()
                     line = self.lines.pop(0)
                 # This has been a deprecated entry, don't return anything
-                return self.next()
+                return next(self)
 
             if not line.startswith('msgid'):
                 raise Exception("malformed file: bad line: %s" % line)
@@ -547,7 +546,7 @@ class PoFile(object):
                 self.extra_lines = []
                 while line:
                     line = self.lines.pop(0).strip()
-                return self.next()
+                return next(self)
 
             while not line.startswith('msgstr'):
                 if not line:
@@ -574,8 +573,9 @@ class PoFile(object):
             if not fuzzy:
                 _logger.warning('Missing "#:" formated comment at line %d for the following source:\n\t%s',
                                 self.cur_line(), source[:30])
-            return self.next()
+            return next(self)
         return trans_type, name, res_id, source, trad, '\n'.join(comments)
+    __next__ = next
 
     def write_infos(self, modules):
         import odoo.release as release
@@ -599,7 +599,7 @@ class PoFile(object):
 
                           % { 'project': release.description,
                               'version': release.version,
-                              'modules': reduce(lambda s, m: s + "#\t* %s\n" % m, modules, ""),
+                              'modules': ''.join("#\t* %s\n" % m for m in modules),
                               'now': datetime.utcnow().strftime('%Y-%m-%d %H:%M')+"+0000",
                             }
                           )
@@ -660,7 +660,7 @@ def trans_export(lang, modules, buffer, format, cr):
                 row.setdefault('tnrs', []).append((type, name, res_id))
                 row.setdefault('comments', set()).update(comments)
 
-            for src, row in sorted(grouped_rows.items()):
+            for src, row in sorted(pycompat.items(grouped_rows)):
                 if not lang:
                     # translation template, so no translation value
                     row['translation'] = ''
@@ -674,11 +674,11 @@ def trans_export(lang, modules, buffer, format, cr):
                 module = row[0]
                 rows_by_module.setdefault(module, []).append(row)
             tmpdir = tempfile.mkdtemp()
-            for mod, modrows in rows_by_module.items():
+            for mod, modrows in pycompat.items(rows_by_module):
                 tmpmoddir = join(tmpdir, mod, 'i18n')
                 os.makedirs(tmpmoddir)
                 pofilename = (lang if lang else mod) + ".po" + ('t' if not lang else '')
-                buf = file(join(tmpmoddir, pofilename), 'w')
+                buf = open(join(tmpmoddir, pofilename), 'w')
                 _process('po', [mod], modrows, buf, lang)
                 buf.close()
 
@@ -779,7 +779,7 @@ def babel_extract_qweb(fileobj, keywords, comment_tags, options):
 
 
 def trans_generate(lang, modules, cr):
-    env = odoo.api.Environment(cr, SUPERUSER_ID, {})
+    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
     to_translate = set()
 
     def push_translation(module, type, name, id, source, comments=None):
@@ -846,7 +846,7 @@ def trans_generate(lang, modules, cr):
         if model=='ir.model.fields':
             try:
                 field_name = encode(record.name)
-            except AttributeError, exc:
+            except AttributeError as exc:
                 _logger.error("name error in %s: %s", xml_name, str(exc))
                 continue
             field_model = env.get(record.model)
@@ -859,24 +859,6 @@ def trans_generate(lang, modules, cr):
                 name = "%s,%s" % (encode(record.model), field_name)
                 for dummy, val in field.selection:
                     push_translation(module, 'selection', name, 0, encode(val))
-
-        elif model=='ir.actions.report.xml':
-            name = encode(record.report_name)
-            fname = ""
-            if record.report_rml:
-                fname = record.report_rml
-                parse_func = trans_parse_rml
-                report_type = "report"
-            elif record.report_xsl:
-                continue
-            if fname and record.report_type in ('pdf', 'xsl'):
-                try:
-                    with file_open(fname) as report_file:
-                        d = etree.parse(report_file)
-                        for t in parse_func(d.iter()):
-                            push_translation(module, report_type, name, 0, t)
-                except (IOError, etree.XMLSyntaxError):
-                    _logger.exception("couldn't export translation for report %s %s %s", name, report_type, fname)
 
         for field_name, field in record._fields.iteritems():
             if field.translate:
@@ -1018,7 +1000,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
     if verbose:
         _logger.info('loading translation file for language %s', lang)
 
-    env = odoo.api.Environment(cr, SUPERUSER_ID, context or {})
+    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, context or {})
     Lang = env['res.lang']
     Translation = env['ir.translation']
 
@@ -1091,7 +1073,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
             dic = dict.fromkeys(('type', 'name', 'res_id', 'src', 'value',
                                  'comments', 'imd_model', 'imd_name', 'module'))
             dic['lang'] = lang
-            dic.update(zip(fields, row))
+            dic.update(pycompat.izip(fields, row))
 
             # discard the target from the POT targets.
             src = dic['src']
@@ -1105,7 +1087,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
             if not res_id:
                 return
 
-            if isinstance(res_id, (int, long)) or \
+            if isinstance(res_id, pycompat.integer_types) or \
                     (isinstance(res_id, basestring) and res_id.isdigit()):
                 dic['res_id'] = int(res_id)
                 if module_name:
@@ -1129,7 +1111,7 @@ def trans_load_data(cr, fileobj, fileformat, lang, lang_name=None, verbose=True,
         # Then process the entries implied by the POT file (which is more
         # correct w.r.t. the targets) if some of them remain.
         pot_rows = []
-        for src, target in pot_targets.iteritems():
+        for src, target in pycompat.items(pot_targets):
             if target.value:
                 for type, name, res_id in target.targets:
                     pot_rows.append((type, name, res_id, src, target.value, target.comments))
@@ -1195,6 +1177,6 @@ def load_language(cr, lang):
     :param lang: language ISO code with optional _underscore_ and l10n flavor (ex: 'fr', 'fr_BE', but not 'fr-BE')
     :type lang: str
     """
-    env = odoo.api.Environment(cr, SUPERUSER_ID, {})
+    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
     installer = env['base.language.install'].create({'lang': lang})
     installer.lang_install()

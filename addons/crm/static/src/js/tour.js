@@ -10,7 +10,7 @@ tour.register('crm_tour', {
     url: "/web",
 }, [tour.STEPS.MENU_MORE, {
     trigger: '.o_app[data-menu-xmlid="sales_team.menu_base_partner"], .oe_menu_toggler[data-menu-xmlid="sales_team.menu_base_partner"]',
-    content: _t("Ready to boost you sales? Your <b>sales pipeline</b> can be found here, under this app."),
+    content: _t("Ready to boost your sales? Your <b>sales pipeline</b> can be found here, under this app."),
     position: 'bottom',
 }, {
     trigger: ".o_sales_dashboard .o_dashboard_action[name=\"crm.action_your_pipeline\"]:last",
@@ -45,7 +45,7 @@ tour.register('crm_tour', {
     content: _t("Schedule an activity by clicking here"),
     position: "bottom"
 }, {
-    trigger: ".modal-body .o_form_field_many2one",
+    trigger: ".modal-body .o_field_many2one",
     extra_trigger: ".o_opportunity_kanban",
     content: _t("<p>You will be able to customize your followup activities. Examples:</p><ol><li>introductory email</li><li>call 10 days after</li><li>second call 3 days after, ...</li></ol><p class='mb0'><i>Select a standard activity for now on.</i></p>"),
     position: "bottom",

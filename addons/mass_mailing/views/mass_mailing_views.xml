@@ -2,7 +2,7 @@
 <odoo>
 
         <!-- Marketing / Mass Mailing -->
-        <menuitem name="Mass Mailing" id="mass_mailing_menu_root" sequence="60" web_icon="mass_mailing,static/description/icon.png"/>
+        <menuitem name="Email Marketing" id="mass_mailing_menu_root" sequence="60" web_icon="mass_mailing,static/description/icon.png"/>
         <menuitem name="Mailings" id="mass_mailing_menu"
             parent="mass_mailing_menu_root" sequence="1" groups="mass_mailing.group_mass_mailing_user"/>
         <menuitem name="Contacts" id="mass_mailing_contact_menu"
@@ -65,6 +65,50 @@
             </field>
         </record>
 
+        <record id="view_mail_mass_mailing_contact_kanban" model="ir.ui.view">
+            <field name="name">mail.mass_mailing.contact.kanban</field>
+            <field name="model">mail.mass_mailing.contact</field>
+            <field name="arch" type="xml">
+                <kanban>
+                    <field name="name"/>
+                    <field name="company_name"/>
+                    <field name="email"/>
+                    <field name="message_bounce"/>
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div t-attf-class="oe_kanban_global_click">
+                                <div>
+                                    <field name="tag_ids"/>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-8">
+                                        <strong>
+                                            <t t-esc="record.name.value"/>
+                                        </strong>
+                                    </div>
+                                    <div class="col-xs-4">
+                                        <span class="badge pull-right" title="Number of bounced email.">
+                                            <i class="fa fa-exclamation-triangle"/> <t t-esc="record.message_bounce.value" title=""/>
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-xs-6">
+                                        <strong>
+                                            <t t-esc="record.email.value"/>
+                                        </strong>
+                                    </div>
+                                    <div class="col-xs-6">
+                                        <t t-esc="record.company_name.value"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
         <record model="ir.ui.view" id="view_mail_mass_mailing_contact_form">
             <field name="name">mail.mass_mailing.contact.form</field>
             <field name="model">mail.mass_mailing.contact</field>
@@ -111,7 +155,7 @@
             <field name="model">mail.mass_mailing.contact</field>
             <field name="priority">10</field>
             <field name="arch" type="xml">
-                <pivot string="Contacts" type="pivot" stacked="True">
+                <pivot string="Contacts" stacked="True">
                     <field name="create_date" type="row"/>
                 </pivot>
             </field>
@@ -122,7 +166,7 @@
             <field name="model">mail.mass_mailing.contact</field>
             <field name="priority">10</field>
             <field name="arch" type="xml">
-                <graph string="Contacts" type="pivot" stacked="True">
+                <graph string="Contacts" stacked="True">
                     <field name="create_date" type="row"/>
                 </graph>
             </field>
@@ -132,7 +176,7 @@
             <field name="name">Contacts</field>
             <field name="res_model">mail.mass_mailing.contact</field>
             <field name="view_type">form</field>
-            <field name="view_mode">tree,form,graph,pivot</field>
+            <field name="view_mode">tree,kanban,form,graph,pivot</field>
             <field name="context">{'search_default_not_opt_out': 1}</field>
         </record>
 
@@ -142,7 +186,7 @@
             <field name="view_type">form</field>
             <field name="view_mode">tree,form,graph</field>
             <field name="domain">[('list_ids', 'in', [active_id])]</field>
-            <field name="context">{'search_default_not_opt_out': 1}</field>
+            <field name="context">{'search_default_not_opt_out': 1, 'default_list_ids': [(4,active_id)]}</field>
             <field name="help" type="html">
               <p class="oe_view_nocontent_create">
                 Click to create a recipient.
@@ -184,6 +228,30 @@
             </field>
         </record>
 
+        <record id="view_mail_mass_mailing_list_kanban" model="ir.ui.view">
+            <field name="name">mail.mass_mailing.list.kanban</field>
+            <field name="model">mail.mass_mailing.list</field>
+            <field name="arch" type="xml">
+                <kanban class="o_kanban_mobile">
+                    <field name="name"/>
+                    <field name="contact_nbr"/>
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div t-attf-class="oe_kanban_global_click">
+                                <div>
+                                    <strong><t t-esc="record.name.value"/></strong>
+                                    <span class="pull-right badge">
+                                        <i class="fa fa-user"/>
+                                        <t t-esc="record.contact_nbr.value"/>
+                                    </span>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
         <record model="ir.ui.view" id="view_mail_mass_mailing_list_form">
             <field name="name">mail.mass_mailing.list.form</field>
             <field name="model">mail.mass_mailing.list</field>
@@ -216,7 +284,7 @@
             <field name="name">Mailing Lists</field>
             <field name="res_model">mail.mass_mailing.list</field>
             <field name="view_type">form</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">tree,kanban,form</field>
             <field name="help" type="html">
                 <p class="oe_view_nocontent_create">
                     Click here to create a new mailing list.
@@ -351,9 +419,9 @@
                                 <field name="mailing_model_real" invisible="1"/>
                                 <field name="mailing_domain" widget="domain"
                                     attrs="{'invisible': [('mailing_model', '=', 'mail.mass_mailing.list')]}"
-                                    options="{'model': 'mailing_model'}"
+                                    options="{'model': 'mailing_model_real'}"
                                     context="{'search_default_not_opt_out':1}"/>
-                                <div attrs="{'invisible': [('mailing_model', '&lt;&gt;', 'mail.mass_mailing.list')]}">
+                                <div attrs="{'invisible': [('mailing_model', '!=', 'mail.mass_mailing.list')]}">
                                     <label for="contact_list_ids" string="Select mailing lists:" class="oe_edit_only"/>
                                     <field name="contact_list_ids" widget="many2many_tags"
                                         placeholder="Select mailing lists..." class="oe_inline"/>
@@ -456,7 +524,7 @@
                                                 </div>
                                             </div>
                                             <div class='o_kanban_primary_bottom'>
-                                                <field name="delivered" widget="progress" title="Delivered" options="{'current_value': 'delivered', 'max_value': 'total', 'editable': false}"/>
+                                                <field name="delivered" widget="progressbar" title="Delivered" options="{'current_value': 'delivered', 'max_value': 'total', 'editable': false}"/>
                                             </div>
                                         </t>
                                     </div>
@@ -691,6 +759,7 @@
                             <field name="name" string="Campaign Name"/>
                             <field name="user_id"/>
                             <field name="tag_ids" widget="many2many_tags" options="{'no_create_edit': True}"/>
+                            <field name="unique_ab_testing" groups="base.group_no_one"/>
                         </group>
                         <notebook>
                             <page string="Tracking">
@@ -761,8 +830,7 @@
                                     <div class="oe_clear"></div>
                                     <div>
                                         <div style="display: inline-block">
-                                            <field name="delivered" widget="gauge" style="width:120px; height: 90px;"
-                                                options="{'max_field': 'total'}"/>
+                                            <field name="delivered" widget="gauge" options="{'max_field': 'total', 'style': 'width:120px; height: 90px;'}"/>
                                         </div>
                                         <div style="display: inline-block; vertical-align: top;">
                                             <strong>Opened</strong> <field name="opened_ratio"/> %<br />

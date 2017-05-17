@@ -1,12 +1,12 @@
 # coding: utf-8
+from werkzeug import urls
 
-from authorize_request import AuthorizeAPI
+from .authorize_request import AuthorizeAPI
 from datetime import datetime
 import hashlib
 import hmac
 import logging
 import time
-import urlparse
 
 from odoo import api, fields, models
 from odoo.addons.payment.models.payment_acquirer import ValidationError
@@ -72,8 +72,8 @@ class PaymentAcquirerAuthorize(models.Model):
             'x_version': '3.1',
             'x_relay_response': 'TRUE',
             'x_fp_timestamp': str(int(time.time())),
-            'x_relay_url': '%s' % urlparse.urljoin(base_url, AuthorizeController._return_url),
-            'x_cancel_url': '%s' % urlparse.urljoin(base_url, AuthorizeController._cancel_url),
+            'x_relay_url': urls.url_join(base_url, AuthorizeController._return_url),
+            'x_cancel_url': urls.url_join(base_url, AuthorizeController._cancel_url),
             'x_currency_code': values['currency'] and values['currency'].name or '',
             'address': values.get('partner_address'),
             'city': values.get('partner_city'),
@@ -146,6 +146,17 @@ class TxAuthorize(models.Model):
     # --------------------------------------------------
     # FORM RELATED METHODS
     # --------------------------------------------------
+
+    @api.model
+    def create(self, vals):
+        # The reference is used in the Authorize form to fill a field (invoiceNumber) which is
+        # limited to 20 characters. We truncate the reference now, since it will be reused at
+        # payment validation to find back the transaction.
+        if 'reference' in vals and 'acquirer_id' in vals:
+            acquier = self.env['payment.acquirer'].browse(vals['acquirer_id'])
+            if acquier.provider == 'authorize':
+                vals['reference'] = vals.get('reference', '')[:20]
+        return super(TxAuthorize, self).create(vals)
 
     @api.model
     def _authorize_form_get_tx_from_data(self, data):
@@ -274,15 +285,14 @@ class TxAuthorize(models.Model):
                     'acquirer_reference': tree.get('x_trans_id'),
                     'date_validate': fields.Datetime.now(),
                 })
-                if self.callback_eval and init_state != 'authorized':
-                    safe_eval(self.callback_eval, {'self': self})
+                if init_state != 'authorized':
+                    self.execute_callback()
             if tree.get('x_type').lower() == 'auth_only':
                 self.write({
                     'state': 'authorized',
                     'acquirer_reference': tree.get('x_trans_id'),
                 })
-                if self.callback_eval:
-                    safe_eval(self.callback_eval, {'self': self})
+                self.execute_callback()
             if tree.get('x_type').lower() == 'void':
                 self.write({
                     'state': 'cancel',

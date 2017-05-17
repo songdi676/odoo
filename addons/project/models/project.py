@@ -86,8 +86,10 @@ class Project(models.Model):
             ])
 
     def _compute_task_count(self):
+        task_data = self.env['project.task'].read_group([('project_id', 'in', self.ids), '|', ('stage_id.fold', '=', False), ('stage_id', '=', False)], ['project_id'], ['project_id'])
+        result = dict((data['project_id'][0], data['project_id_count']) for data in task_data)
         for project in self:
-            project.task_count = len(project.task_ids)
+            project.task_count = result.get(project.id, 0)
 
     def _compute_task_needaction_count(self):
         projects_data = self.env['project.task'].read_group([
@@ -185,7 +187,9 @@ class Project(models.Model):
         help="Whether this project should be displayed on the dashboard or not")
     label_tasks = fields.Char(string='Use Tasks as', default='Tasks', help="Gives label to tasks on project's kanban view.")
     tasks = fields.One2many('project.task', 'project_id', string="Task Activities")
-    resource_calendar_id = fields.Many2one('resource.calendar', string='Working Time',
+    resource_calendar_id = fields.Many2one(
+        'resource.calendar', string='Working Time',
+        default=lambda self: self.env.user.company_id.resource_calendar_id.id,
         help="Timetable working hours to adjust the gantt diagram report")
     type_ids = fields.Many2many('project.task.type', 'project_task_type_rel', 'project_id', 'type_id', string='Tasks Stages')
     task_count = fields.Integer(compute='_compute_task_count', string="Tasks")
@@ -193,7 +197,7 @@ class Project(models.Model):
     task_ids = fields.One2many('project.task', 'project_id', string='Tasks',
                                domain=['|', ('stage_id.fold', '=', False), ('stage_id', '=', False)])
     color = fields.Integer(string='Color Index')
-    user_id = fields.Many2one('res.users', string='Project Manager', default=lambda self: self.env.user)
+    user_id = fields.Many2one('res.users', string='Project Manager', default=lambda self: self.env.user, track_visibility="onchange")
     alias_id = fields.Many2one('mail.alias', string='Alias', ondelete="restrict", required=True,
         help="Internal email associated with this project. Incoming emails are automatically synchronized "
              "with Tasks (or optionally Issues if the Issue Tracker module is installed).")
@@ -251,7 +255,10 @@ class Project(models.Model):
             vals['alias_name'] = vals.get('alias_name') or vals.get('name')
         # Prevent double project creation when 'use_tasks' is checked
         self = self.with_context(project_creation_in_progress=True, mail_create_nosubscribe=True)
-        return super(Project, self).create(vals)
+        project = super(Project, self).create(vals)
+        if project.privacy_visibility == 'portal' and project.partner_id:
+            project.message_subscribe(project.partner_id.ids)
+        return project
 
     @api.multi
     def write(self, vals):
@@ -262,7 +269,29 @@ class Project(models.Model):
         if 'active' in vals:
             # archiving/unarchiving a project does it on its tasks, too
             self.with_context(active_test=False).mapped('tasks').write({'active': vals['active']})
+        if vals.get('partner_id') or vals.get('privacy_visibility'):
+            for project in self.filtered(lambda project: project.privacy_visibility == 'portal'):
+                project.message_subscribe(project.partner_id.ids)
         return res
+
+    @api.multi
+    def message_subscribe(self, partner_ids=None, channel_ids=None, subtype_ids=None, force=True):
+        """ Subscribe to all existing active tasks when subscribing to a project """
+        res = super(Project, self).message_subscribe(partner_ids=partner_ids, channel_ids=channel_ids, subtype_ids=subtype_ids, force=force)
+        if not subtype_ids or any(subtype.parent_id.res_model == 'project.task' for subtype in self.env['mail.message.subtype'].browse(subtype_ids)):
+            for partner_id in partner_ids or []:
+                self.mapped('tasks').filtered(lambda task: not task.stage_id.fold and partner_id not in task.message_partner_ids.ids).message_subscribe(
+                    partner_ids=[partner_id], channel_ids=None, subtype_ids=None, force=False)
+            for channel_id in channel_ids or []:
+                self.mapped('tasks').filtered(lambda task: not task.stage_id.fold and channel_id not in task.message_channel_ids.ids).message_subscribe(
+                    partner_ids=None, channel_ids=[channel_id], subtype_ids=None, force=False)
+        return res
+
+    @api.multi
+    def message_unsubscribe(self, partner_ids=None, channel_ids=None):
+        """ Unsubscribe from all tasks when unsubscribing from a project """
+        self.mapped('tasks').message_unsubscribe(partner_ids=partner_ids, channel_ids=channel_ids)
+        return super(Project, self).message_unsubscribe(partner_ids=partner_ids, channel_ids=channel_ids)
 
     @api.multi
     def toggle_favorite(self):
@@ -585,7 +614,7 @@ class Task(models.Model):
         email_list = tools.email_split((msg.get('to') or '') + ',' + (msg.get('cc') or ''))
         # check left-part is not already an alias
         aliases = self.mapped('project_id.alias_name')
-        return filter(lambda x: x.split('@')[0] not in aliases, email_list)
+        return [x for x in email_list if x.split('@')[0] not in aliases]
 
     @api.model
     def message_new(self, msg, custom_values=None):
@@ -599,12 +628,11 @@ class Task(models.Model):
         }
         defaults.update(custom_values)
 
-        res = super(Task, self).message_new(msg, custom_values=defaults)
-        task = self.browse(res)
+        task = super(Task, self).message_new(msg, custom_values=defaults)
         email_list = task.email_split(msg)
-        partner_ids = filter(None, task._find_partner_from_emails(email_list, force_create=False))
+        partner_ids = [p for p in task._find_partner_from_emails(email_list, force_create=False) if p]
         task.message_subscribe(partner_ids)
-        return res
+        return task
 
     @api.multi
     def message_update(self, msg, update_vals=None):
@@ -627,7 +655,7 @@ class Task(models.Model):
                         pass
 
         email_list = self.email_split(msg)
-        partner_ids = filter(None, self._find_partner_from_emails(email_list, force_create=False))
+        partner_ids = [p for p in self._find_partner_from_emails(email_list, force_create=False) if p]
         self.message_subscribe(partner_ids)
         return super(Task, self).message_update(msg, update_vals=update_vals)
 
@@ -649,7 +677,7 @@ class Task(models.Model):
             except Exception:
                 pass
         if self.project_id:
-            current_objects = filter(None, headers.get('X-Odoo-Objects', '').split(','))
+            current_objects = [h for h in headers.get('X-Odoo-Objects', '').split(',') if h]
             current_objects.insert(0, 'project.project-%s, ' % self.project_id.id)
             headers['X-Odoo-Objects'] = ','.join(current_objects)
         if self.tag_ids:
@@ -751,7 +779,7 @@ class ProjectTags(models.Model):
     _description = "Tags of project's tasks, issues..."
 
     name = fields.Char(required=True)
-    color = fields.Integer(string='Color Index')
+    color = fields.Integer(string='Color Index', default=10)
 
     _sql_constraints = [
         ('name_uniq', 'unique (name)', "Tag name already exists !"),

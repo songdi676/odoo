@@ -49,6 +49,7 @@
             <field name="priority" eval="10"/>
             <field name="arch" type="xml">
                 <kanban>
+                    <field name="id"/>
                     <field name="description"/>
                     <field name="is_subscribed"/>
                     <field name="group_ids"/>
@@ -106,25 +107,23 @@
                                     <field name="alias_name" class="oe_inline"/>@<field name="alias_domain" class="oe_inline" readonly="1"/>
                                 </div>
                             </div>
-                            <label for="alias_contact" string=" " class="fa fa-lock" style="min-width: 20px;"/>
-                            <field name="alias_contact" class="oe_inline" nolabel="1"/>
+                            <field name="alias_contact" class="oe_inline" invisible="1"/>
                         </group>
                         <notebook>
                             <page string="Privacy">
                                 <group class="o_label_nowrap">
                                     <field name="public" widget="radio" string="Who can follow the group's activities?"/>
                                     <field name="group_public_id"
-                                        attrs="{'invisible': [('public','&lt;&gt;','groups')], 'required': [('public','=','groups')]}"
+                                        attrs="{'invisible': [('public','!=','groups')], 'required': [('public','=','groups')]}"
                                         />
                                     <field name="group_ids" widget="many2many_tags"/>
                                 </group>
                             </page>
                             <page string="Members">
-                                <field name="channel_partner_ids" mode="tree">
-                                    <tree string="members">
-                                        <field name="name"/>
-                                        <field name="email"/>
-                                        <field name="im_status"/>
+                                <field name="channel_last_seen_partner_ids" mode="tree" context="{'active_test': False}">
+                                    <tree string="Members" editable="bottom">
+                                        <field name="partner_id"/>
+                                        <field name="partner_email"/>
                                     </tree>
                                 </field>
                             </page>

@@ -28,19 +28,21 @@ class WebsiteConfigSettings(models.TransientModel):
     module_delivery_usps = fields.Boolean("USPS integration")
 
     module_sale_ebay = fields.Boolean("eBay connector")
+    module_sale_coupon = fields.Boolean("Discount Programs")
 
-    group_website_multiimage = fields.Boolean(string='Multi-Images', implied_group='website_sale.group_website_multi_image')
+    group_website_multiimage = fields.Boolean(string='Multi-Images', implied_group='website_sale.group_website_multi_image', group='base.group_portal,base.group_user,base.group_public')
     group_discount_per_so_line = fields.Boolean(string="Discounted Prices", implied_group='sale.group_discount_per_so_line')
     group_delivery_invoice_address = fields.Boolean(string="Shipping Address", implied_group='sale.group_delivery_invoice_address')
 
     module_website_sale_options = fields.Boolean("Optional Products", help='Installs *e-Commerce Optional Products*')
     module_website_sale_digital = fields.Boolean("Digital Content")
+    module_website_sale_wishlist = fields.Boolean("Wishlists ", help='Installs *e-Commerce Wishlist*')
+    module_website_sale_comparison = fields.Boolean("Product Comparator", help='Installs *e-Commerce Comparator*')
 
     module_sale_stock = fields.Boolean("Delivery Orders")
-    module_portal = fields.Boolean("Activate the customer portal", help="""Give your customers access to their documents.""")
 
     # the next 2 fields represent sale_pricelist_setting from sale.config.settings, they are split here for the form view, to improve usability
-    sale_pricelist_setting_split_1 = fields.Boolean(default=0, string="Multiple Prices per Products")
+    sale_pricelist_setting_split_1 = fields.Boolean(default=0, string="Multiple Prices per Product")
     sale_pricelist_setting_split_2 = fields.Selection([
         (0, 'Multiple prices per product (e.g. customer segments, currencies)'),
         (1, 'Prices computed from formulas (discounts, margins, roundings)')
@@ -48,15 +50,23 @@ class WebsiteConfigSettings(models.TransientModel):
     group_sale_pricelist = fields.Boolean("Use pricelists to adapt your price per customers",
         implied_group='product.group_sale_pricelist')
 
-    group_product_variant = fields.Boolean("Attributes and Variants", implied_group='product.group_sale_pricelist')
+    group_product_variant = fields.Boolean("Attributes and Variants", implied_group='product.group_product_variant')
     group_pricelist_item = fields.Boolean("Show pricelists to customers",
         implied_group='product.group_pricelist_item')
     group_product_pricelist = fields.Boolean("Show pricelists On Products",
         implied_group='product.group_product_pricelist')
 
-    order_mail_template = fields.Many2one('mail.template', string='Order Confirmation Email', default=_default_order_mail_template, help="Email sent to customer at the end of the checkout process")
-    group_show_price_subtotal = fields.Boolean("Show subtotal", implied_group='sale.group_show_price_subtotal')
-    group_show_price_total = fields.Boolean("Show total", implied_group='sale.group_show_price_total')
+    order_mail_template = fields.Many2one('mail.template', string='Order Confirmation Email',
+        default=_default_order_mail_template, domain="[('model', '=', 'sale.order')]",
+        help="Email sent to customer at the end of the checkout process")
+    group_show_price_subtotal = fields.Boolean(
+        "Show subtotal",
+        implied_group='sale.group_show_price_subtotal',
+        group='base.group_portal,base.group_user,base.group_public')
+    group_show_price_total = fields.Boolean(
+        "Show total",
+        implied_group='sale.group_show_price_total',
+        group='base.group_portal,base.group_user,base.group_public')
 
     default_invoice_policy = fields.Selection([
         ('order', 'Ordered quantities'),

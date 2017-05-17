@@ -46,15 +46,18 @@ class SaleOrderLine(models.Model):
 class SaleOrder(models.Model):
     _inherit = 'sale.order'
 
-    def _get_default_template_id(self):
-        return self.env.ref('website_quote.website_quote_template_default', raise_if_not_found=False)
+    def _website_url(self):
+        super(SaleOrder, self)._website_url()
+        for so in self:
+            if so.state not in ['sale', 'done']:
+                so.website_url = '/quote/%s' % (so.id)
 
     access_token = fields.Char(
         'Security Token', copy=False, default=lambda self: str(uuid.uuid4()),
         required=True)
     template_id = fields.Many2one(
         'sale.quote.template', 'Quotation Template',
-        default=_get_default_template_id, readonly=True,
+        readonly=True,
         states={'draft': [('readonly', False)], 'sent': [('readonly', False)]})
     website_description = fields.Html('Description', sanitize_attributes=False, translate=html_translate)
     options = fields.One2many(
@@ -76,6 +79,19 @@ class SaleOrder(models.Model):
         for line in self.order_line:
             total += line.price_subtotal + line.price_unit * ((line.discount or 0.0) / 100.0) * line.product_uom_qty  # why is there a discount in a field named amount_undiscounted ??
         self.amount_undiscounted = total
+
+    @api.onchange('partner_id')
+    def onchange_partner_id(self):
+        super(SaleOrder, self).onchange_partner_id()
+        self.note = self.template_id.note or self.note
+
+    @api.onchange('partner_id')
+    def onchange_update_description_lang(self):
+        if not self.template_id:
+            return
+        else:
+            template = self.template_id.with_context(lang=self.partner_id.lang)
+            self.website_description = template.website_description
 
     @api.onchange('template_id')
     def onchange_template_id(self):
@@ -151,7 +167,7 @@ class SaleOrder(models.Model):
     def get_access_action(self):
         """ Instead of the classic form view, redirect to the online quote if it exists. """
         self.ensure_one()
-        if not self.template_id:
+        if not self.template_id or (not self.env.user.share and not self.env.context.get('force_website')):
             return super(SaleOrder, self).get_access_action()
         return {
             'type': 'ir.actions.act_url',
@@ -165,8 +181,7 @@ class SaleOrder(models.Model):
         """ Payment callback: validate the order and write transaction details in chatter """
         # create draft invoice if transaction is ok
         if transaction and transaction.state == 'done':
-            if self.state in ['draft', 'sent']:
-                self.sudo().action_confirm()
+            transaction._confirm_so()
             message = _('Order paid by %s. Transaction: %s. Amount: %s.') % (transaction.partner_id.name, transaction.acquirer_reference, transaction.amount)
             self.message_post(body=message)
             return True

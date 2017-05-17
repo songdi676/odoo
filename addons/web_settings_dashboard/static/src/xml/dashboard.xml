@@ -7,9 +7,11 @@
                 <div class="o_web_settings_dashboard_enterprise"/>
                 <div class="col-lg-3 col-md-3 col-sm-6 col-xs-12 o_web_settings_dashboard_col">
                     <div class="text-center o_web_settings_dashboard_apps"></div>
+                    <div class="text-center o_web_settings_dashboard_translations"></div>
                 </div>
                 <div class="col-lg-3 col-md-3 col-sm-6 col-xs-12 o_web_settings_dashboard_col">
                     <div class="text-center o_web_settings_dashboard_invitations"></div>
+                    <div class="text-center o_web_settings_dashboard_company"></div>
                 </div>
                 <div class="col-lg-3 col-md-3 col-sm-6 col-xs-12 o_web_settings_dashboard_col">
                     <div class="text-center o_web_settings_dashboard_planner"></div>
@@ -99,7 +101,7 @@
             <t t-set="planners" t-value="widget.planners"/>
             <t t-call="DashboardPlanner.PlannersList"/>
             <hr/>
-            Need more help? <a href="https://www.odoo.com/documentation/user">Browse the documentation.</a>
+            Need more help? <a target="_blank" href="https://www.odoo.com/documentation/user">Browse the documentation.</a>
         </div>
     </t>
 
@@ -136,9 +138,9 @@
                 </small>
             </div>
             <div class="row mt16">
-                <div class="col-xs-4"><a><i class="fa fa-twitter-square fa-4x tw_share"/></a></div>
-                <div class="col-xs-4"><a><i class="fa fa-facebook-square fa-4x fb_share"/></a></div>
-                <div class="col-xs-4"><a><i class="fa fa-linkedin-square fa-4x li_share"/></a></div>
+                <div class="col-xs-4"><a href="#"><i class="fa fa-twitter-square fa-4x tw_share"/></a></div>
+                <div class="col-xs-4"><a href="#"><i class="fa fa-facebook-square fa-4x fb_share"/></a></div>
+                <div class="col-xs-4"><a href="#"><i class="fa fa-linkedin-square fa-4x li_share"/></a></div>
             </div>
             <hr/>
             <t t-set="server_version" t-value="widget.data.server_version"/>
@@ -183,6 +185,40 @@
                 <div>
                     <a class="btn btn-primary btn-block o_confirm_upgrade" role="button"><strong>Upgrade Now</strong></a>
                 </div>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="DashboardTranslations">
+        <div class="text-center o_web_settings_dashboard_translations mt8">
+            <i class="fa fa-globe fa-4x text-muted"></i>
+            <div class="o_web_settings_dashboard_header">
+                Translations
+            </div>
+            <div>
+                <small class="text-muted text-center o_web_settings_dashboard_compact_subtitle">
+                    Send your documents in your partner's language or set up a language for your users
+                </small>
+            </div>
+            <div class="mt16">
+                <a class="btn btn-primary btn-block o_load_translations"><strong>Load a Translation</strong></a>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="DashboardCompany">
+        <div class="text-center o_web_settings_dashboard_company mt8">
+            <i class="fa fa-suitcase fa-4x text-muted"></i>
+            <div class="o_web_settings_dashboard_header">
+                <t t-esc="widget.data.company_name"></t>
+            </div>
+            <div>
+                <small class="text-muted text-center o_web_settings_dashboard_compact_subtitle">
+                    Set up your company information
+                </small>
+            </div>
+            <div class="mt16">
+                <a class="btn btn-primary btn-block o_setup_company"><strong>Set Up</strong></a>
             </div>
         </div>
     </t>

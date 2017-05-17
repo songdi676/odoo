@@ -42,7 +42,7 @@ class ir_cron(models.Model):
         'ir.actions.server', 'Server action',
         delegate=True, ondelete='restrict', required=True)
     cron_name = fields.Char('Name', related='ir_actions_server_id.name', store=True)
-    user_id = fields.Many2one('res.users', string='User', default=lambda self: self.env.user, required=True)
+    user_id = fields.Many2one('res.users', string='Cron User', default=lambda self: self.env.user, required=True)
     active = fields.Boolean(default=True)
     interval_number = fields.Integer(default=1, help="Repeat every x.")
     interval_type = fields.Selection([('minutes', 'Minutes'),
@@ -72,8 +72,6 @@ class ir_cron(models.Model):
 
         Simply logs the exception and rollback the transaction. """
         self._cr.rollback()
-        _logger.exception("Call from cron %s for server action %d failed in Job %s",
-                          cron_name, server_action_id, job_id)
 
     @api.model
     def _callback(self, cron_name, server_action_id, job_id):
@@ -88,14 +86,18 @@ class ir_cron(models.Model):
 
             log_depth = (None if _logger.isEnabledFor(logging.DEBUG) else 1)
             odoo.netsvc.log(_logger, logging.DEBUG, 'cron.object.execute', (self._cr.dbname, self._uid, '*', cron_name, server_action_id), depth=log_depth)
+            start_time = False
             if _logger.isEnabledFor(logging.DEBUG):
                 start_time = time.time()
             self.env['ir.actions.server'].browse(server_action_id).run()
-            if _logger.isEnabledFor(logging.DEBUG):
+            if start_time and _logger.isEnabledFor(logging.DEBUG):
                 end_time = time.time()
                 _logger.debug('%.3fs (cron %s, server action %d with uid %d)', end_time - start_time, cron_name, server_action_id, self.env.uid)
-            self.pool.signal_caches_change()
-        except Exception, e:
+            self.pool.signal_changes()
+        except Exception as e:
+            self.pool.reset_changes()
+            _logger.exception("Call from cron %s for server action #%s failed in Job #%s",
+                              cron_name, server_action_id, job_id)
             self._handle_callback_exception(cron_name, server_action_id, job_id, e)
 
     @classmethod
@@ -152,21 +154,21 @@ class ir_cron(models.Model):
         """
         db = odoo.sql_db.db_connect(db_name)
         threading.current_thread().dbname = db_name
-        cr = db.cursor()
         jobs = []
         try:
-            # Make sure the database we poll has the same version as the code of base
-            cr.execute("SELECT 1 FROM ir_module_module WHERE name=%s AND latest_version=%s", ('base', BASE_VERSION))
-            if cr.fetchone():
-                # Careful to compare timestamps with 'UTC' - everything is UTC as of v6.1.
-                cr.execute("""SELECT * FROM ir_cron
-                              WHERE numbercall != 0
-                                  AND active AND nextcall <= (now() at time zone 'UTC')
-                              ORDER BY priority""")
-                jobs = cr.dictfetchall()
-            else:
-                _logger.warning('Skipping database %s as its base version is not %s.', db_name, BASE_VERSION)
-        except psycopg2.ProgrammingError, e:
+            with db.cursor() as cr:
+                # Make sure the database we poll has the same version as the code of base
+                cr.execute("SELECT 1 FROM ir_module_module WHERE name=%s AND latest_version=%s", ('base', BASE_VERSION))
+                if cr.fetchone():
+                    # Careful to compare timestamps with 'UTC' - everything is UTC as of v6.1.
+                    cr.execute("""SELECT * FROM ir_cron
+                                  WHERE numbercall != 0
+                                      AND active AND nextcall <= (now() at time zone 'UTC')
+                                  ORDER BY priority""")
+                    jobs = cr.dictfetchall()
+                else:
+                    _logger.warning('Skipping database %s as its base version is not %s.', db_name, BASE_VERSION)
+        except psycopg2.ProgrammingError as e:
             if e.pgcode == '42P01':
                 # Class 42 — Syntax Error or Access Rule Violation; 42P01: undefined_table
                 # The table ir_cron does not exist; this is probably not an OpenERP database.
@@ -175,8 +177,6 @@ class ir_cron(models.Model):
                 raise
         except Exception:
             _logger.warning('Exception in cron:', exc_info=True)
-        finally:
-            cr.close()
 
         for job in jobs:
             lock_cr = db.cursor()
@@ -208,7 +208,7 @@ class ir_cron(models.Model):
                 finally:
                     job_cr.close()
 
-            except psycopg2.OperationalError, e:
+            except psycopg2.OperationalError as e:
                 if e.pgcode == '55P03':
                     # Class 55: Object not in prerequisite state; 55P03: lock_not_available
                     _logger.debug('Another process/thread is already busy executing job `%s`, skipping it.', job['cron_name'])

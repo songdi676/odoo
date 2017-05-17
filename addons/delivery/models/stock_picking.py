@@ -31,7 +31,7 @@ class StockPackOperation(models.Model):
     @api.multi
     def manage_package_type(self):
         self.ensure_one()
-        view_id = self.env.ref('delivery.choose_delivery_package_view_form').id;
+        view_id = self.env.ref('delivery.choose_delivery_package_view_form').id
         return {
             'name': _('Package Details'),
             'type': 'ir.actions.act_window',
@@ -51,8 +51,11 @@ class StockPicking(models.Model):
     _inherit = 'stock.picking'
 
     def _default_uom(self):
-        uom_categ_id = self.env.ref('product.product_uom_categ_kgm').id
-        return self.env['product.uom'].search([('category_id', '=', uom_categ_id), ('factor', '=', 1)], limit=1)
+        weight_uom_id = self.env.ref('product.product_uom_kgm', raise_if_not_found=False)
+        if not weight_uom_id:
+            uom_categ_id = self.env.ref('product.product_uom_categ_kgm').id
+            weight_uom_id = self.env['product.uom'].search([('category_id', '=', uom_categ_id), ('factor', '=', 1)], limit=1)
+        return weight_uom_id
 
     @api.one
     @api.depends('pack_operation_ids')
@@ -120,19 +123,22 @@ class StockPicking(models.Model):
 
     @api.multi
     def put_in_pack(self):
-        view_id = self.env.ref('delivery.choose_delivery_package_view_form').id;
-        return {
-            'name': _('Package Details'),
-            'type': 'ir.actions.act_window',
-            'view_mode': 'form',
-            'res_model': 'choose.delivery.package',
-            'view_id': view_id,
-            'views': [(view_id, 'form')],
-            'target': 'new',
-            'context': {
-                'current_package_carrier_type': self.carrier_id.delivery_type if self.carrier_id.delivery_type not in ['base_on_rule', 'fixed'] else 'none',
+        if self.carrier_id and self.carrier_id.delivery_type not in ['base_on_rule', 'fixed']:
+            view_id = self.env.ref('delivery.choose_delivery_package_view_form').id
+            return {
+                'name': _('Package Details'),
+                'type': 'ir.actions.act_window',
+                'view_mode': 'form',
+                'res_model': 'choose.delivery.package',
+                'view_id': view_id,
+                'views': [(view_id, 'form')],
+                'target': 'new',
+                'context': {
+                    'current_package_carrier_type': self.carrier_id.delivery_type,
+                }
             }
-        }
+        else:
+            return self._put_in_pack()
 
     @api.multi
     def send_to_shipper(self):

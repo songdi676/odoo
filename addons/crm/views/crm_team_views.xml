@@ -1,11 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
+        <!--
+            This menu item's purpose is to overwrite another one defined in
+            the sales_team module in order to set action.
+        -->
+
+        <menuitem id="sales_team.menu_sales_team_act" action="sales_team.crm_team_salesteams_act" sequence="1" parent="sales_team.menu_base_partner" name="Dashboard"/>
+
+        <menuitem id="sales_team.menu_partner_form" parent="sales_team.menu_sales" action="base.action_partner_form" sequence="3"/>
+
+        <menuitem id="sales_team.menu_sale_general_settings" name="Settings" parent="sales_team.menu_sale_config" sequence="0" action="sales_team.action_sale_config" groups="base.group_system"/>
+        <menuitem name="Sales Channels" id="sales_team.sales_team_config" parent="sales_team.menu_sale_config" action="sales_team.sales_team_config_action" sequence="2"/>
+        <menuitem name="Activity Types" id="sales_team.sales_team_menu_config_activity_types" sequence="2" action="sales_team.mail_activity_type_action_config_sales" parent="sales_team.menu_sale_config"/>
+
+        <menuitem action="base.action_partner_category_form" id="sales_team.menu_partner_category_form" name="Contact Tags" sequence="1" parent="sales_team.menu_config_address_book" groups="base.group_no_one"/>
+        <menuitem action="base.action_partner_title_contact" id="sales_team.menu_partner_title_contact" name="Contact Titles" parent="sales_team.menu_config_address_book" sequence="3" groups="base.group_no_one"/>
+
+        <menuitem action="base.action_country" id="sales_team.menu_country_partner" parent="sales_team.menu_localisation" sequence="1" groups="base.group_no_one"/>
+        <menuitem action="base.action_country_group" id="sales_team.menu_country_group" name="Country Group" parent="sales_team.menu_localisation" sequence="3" groups="base.group_no_one"/>
+        <menuitem action="base.action_country_state" id="sales_team.menu_country_state_partner" parent="sales_team.menu_localisation" sequence="2" groups="base.group_no_one"/>
+        <menuitem action="base.action_currency_form" id="sales_team.menu_action_currency_form" parent="sales_team.menu_localisation" sequence="3" groups="base.group_multi_currency"/>
+
+        <menuitem action="base.action_res_bank_form" id="sales_team.menu_action_res_bank_form" parent="sales_team.menu_config_bank_accounts" sequence="1" groups="base.group_no_one"/>
+        <menuitem action="base.action_res_partner_bank_account_form" id="sales_team.menu_action_res_partner_bank_form" parent="sales_team.menu_config_bank_accounts" groups="base.group_no_one" sequence="2"/>
+
         <!-- CRM lead search by Salesteams -->
         <record id="crm_case_form_view_salesteams_lead" model="ir.actions.act_window">
             <field name="name">Leads</field>
             <field name="res_model">crm.lead</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">tree,kanban,form</field>
             <field name="domain">['|', ('type','=','lead'), ('type','=',False)]</field>
             <field name="view_id" ref="crm_case_tree_view_leads"/>
             <field name="search_view_id" ref="crm.view_crm_case_leads_filter"/>
@@ -59,7 +83,7 @@
            <field name="name">Leads Analysis</field>
            <field name="res_model">crm.opportunity.report</field>
            <field name="context">{"search_default_month":1}</field>
-           <field name="view_mode">pivot,graph</field>
+           <field name="view_mode">graph,pivot</field>
            <field name="view_id" ref="crm.crm_opportunity_report_view_pivot_lead"/>
            <field name="domain">[('type', '=', 'lead'),('team_id', '=', active_id)]</field>
            <field name="context">{'active_test': True}</field>
@@ -69,7 +93,7 @@
        <record id="action_report_crm_opportunity_salesteam" model="ir.actions.act_window">
             <field name="name">Pipeline Analysis</field>
             <field name="res_model">crm.opportunity.report</field>
-            <field name="view_mode">pivot,graph</field>
+            <field name="view_mode">graph,pivot</field>
             <field name="view_id" ref="crm.crm_opportunity_report_view_pivot"/>
             <field name="domain">[('type', '=', 'opportunity'), ('team_id', '=', active_id)]</field>
             <field name="context">{'active_test': True}</field>
@@ -108,6 +132,18 @@
                             string="Accept Emails From"
                             attrs="{'invisible': [('use_leads', '=', False), ('use_opportunities', '=', False)]}"/>
                    </xpath>
+                    <field name="dashboard_graph_period" position="attributes">
+                        <attribute name="attrs">{'invisible': [('dashboard_graph_model', '=', 'crm.opportunity.report')]}</attribute>
+                    </field>
+                    <field name="dashboard_graph_period" position="after">
+                        <field name="dashboard_graph_period_pipeline" attrs="{'invisible': [('dashboard_graph_model', '!=', 'crm.opportunity.report')]}"/>
+                    </field>
+                    <field name="dashboard_graph_group" position="attributes">
+                        <attribute name="attrs">{'invisible': [('dashboard_graph_model', '=', 'crm.opportunity.report')]}</attribute>
+                    </field>
+                    <field name="dashboard_graph_group" position="after">
+                        <field name="dashboard_graph_group_pipeline" attrs="{'invisible': [('dashboard_graph_model', '!=', 'crm.opportunity.report')]}"/>
+                    </field>
                 </field>
             </record>
 
@@ -146,6 +182,7 @@
             <field name="type">ir.actions.act_window</field>
             <field name="view_type">form</field>
             <field name="view_mode">form</field>
+            <field name="view_id" ref="crm_case_form_view_oppor"/>
             <field name="domain">[('type','=','opportunity')]</field>
             <field name="context">{
                     'search_default_team_id': [active_id],
@@ -239,6 +276,10 @@
                     </xpath>
                 </data>
             </field>
+        </record>
+
+        <record id="sales_team.mail_activity_type_action_config_sales" model="ir.actions.act_window">
+            <field name="domain">['|', ('res_model_id', '=', False), ('res_model_id.model', 'in', ['crm.lead', 'res.partner'])]</field>
         </record>
 
 </odoo>

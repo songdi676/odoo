@@ -10,7 +10,6 @@ class PurchaseConfigSettings(models.TransientModel):
 
     company_id = fields.Many2one('res.company', string='Company', required=True,
         default=lambda self: self.env.user.company_id)
-    po_lead = fields.Float(related='company_id.po_lead', string="Purchase Lead Time")
     lock_confirmed_po = fields.Boolean("Lock Confirmed Orders", default=lambda self: self.env.user.company_id.po_lock == 'lock')
     po_lock = fields.Selection(related='company_id.po_lock', string="Purchase Order Modification *")
     po_order_approval = fields.Boolean("Order Approval", default=lambda self: self.env.user.company_id.po_double_validation == 'two_step')
@@ -28,7 +27,7 @@ class PurchaseConfigSettings(models.TransientModel):
         implied_group='product.group_product_variant')
     group_uom = fields.Boolean("Units of Measure",
         implied_group='product.group_uom')
-    module_purchase_requisition = fields.Boolean("Calls for Tenders")
+    module_purchase_requisition = fields.Boolean("Purchase Agreements")
     group_warning_purchase = fields.Boolean("Warnings", implied_group='purchase.group_warning_purchase')
     module_stock_dropshipping = fields.Boolean("Dropshipping")
     group_manage_vendor_price = fields.Boolean("Vendor Pricelists",

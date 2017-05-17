@@ -14,6 +14,7 @@ class SaleReport(models.Model):
 
     name = fields.Char('Order Reference', readonly=True)
     date = fields.Datetime('Date Order', readonly=True)
+    confirmation_date = fields.Datetime('Confirmation Date', readonly=True)
     product_id = fields.Many2one('product.product', 'Product', readonly=True)
     product_uom = fields.Many2one('product.uom', 'Unit of Measure', readonly=True)
     product_uom_qty = fields.Float('Qty Ordered', readonly=True)
@@ -58,6 +59,7 @@ class SaleReport(models.Model):
                     count(*) as nbr,
                     s.name as name,
                     s.date_order as date,
+                    s.confirmation_date as confirmation_date,
                     s.state as state,
                     s.partner_id as partner_id,
                     s.user_id as user_id,
@@ -100,6 +102,7 @@ class SaleReport(models.Model):
                     t.categ_id,
                     s.name,
                     s.date_order,
+                    s.confirmation_date,
                     s.partner_id,
                     s.user_id,
                     s.state,
@@ -122,3 +125,16 @@ class SaleReport(models.Model):
             FROM ( %s )
             %s
             )""" % (self._table, self._select(), self._from(), self._group_by()))
+
+class SaleOrderReportProforma(models.AbstractModel):
+    _name = 'report.sale.report_saleproforma'
+
+    @api.multi
+    def get_report_values(self, docids, data=None):
+        docs = self.env['sale.order'].browse(docids)
+        return {
+            'doc_ids': docs.ids,
+            'doc_model': 'sale.order',
+            'docs': docs,
+            'proforma': True
+        }

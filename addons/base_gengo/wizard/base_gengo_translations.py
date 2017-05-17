@@ -8,6 +8,7 @@ import uuid
 
 from odoo import api, fields, models, tools, _
 from odoo.exceptions import UserError, ValidationError
+from odoo.tools import pycompat
 
 _logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class BaseGengoTranslations(models.TransientModel):
             )
             gengo.getAccountStats()
             return (True, gengo)
-        except Exception, e:
+        except Exception as e:
             _logger.exception('Gengo connection failed')
             return (False, _("Gengo connection failed with this message:\n``%s``") % e)
 
@@ -193,7 +194,7 @@ class BaseGengoTranslations(models.TransientModel):
         term_ids.write(vals)
         jobs = response.get('jobs', [])
         if jobs:
-            for t_id, job in jobs.items():
+            for t_id, job in pycompat.items(jobs):
                 self._update_terms_job(job)
 
         return
@@ -277,5 +278,5 @@ class BaseGengoTranslations(models.TransientModel):
                     _logger.info("%s Translation terms have been posted to Gengo successfully", len(term_ids))
                 if not len(term_ids) == limit:
                     break
-        except Exception, e:
+        except Exception as e:
             _logger.error("%s", e)

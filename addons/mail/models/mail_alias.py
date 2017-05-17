@@ -24,8 +24,8 @@ def remove_accents(input_str):
 
 
 class Alias(models.Model):
-    """A Mail Alias is a mapping of an email address with a given OpenERP Document
-       model. It is used by OpenERP's mail gateway when processing incoming emails
+    """A Mail Alias is a mapping of an email address with a given Odoo Document
+       model. It is used by Odoo's mail gateway when processing incoming emails
        sent to the system. If the recipient address (To) of the message matches
        a Mail Alias, the message will be either processed following the rules
        of that alias. If the message is a reply it will be attached to the
@@ -34,7 +34,7 @@ class Alias(models.Model):
 
        This is meant to be used in combination with a catch-all email configuration
        on the company's mail server, so that as soon as a new mail.alias is
-       created, it becomes immediately usable and OpenERP will accept email for it.
+       created, it becomes immediately usable and Odoo will accept email for it.
      """
     _name = 'mail.alias'
     _description = "Email Aliases"
@@ -239,6 +239,11 @@ class AliasMixin(models.AbstractModel):
         if name != 'alias_id':
             return
 
+        # both self and the alias model must be present in 'ir.model'
+        IM = self.env['ir.model']
+        IM._reflect_model(self)
+        IM._reflect_model(self.env[self.get_alias_model_name({})])
+
         alias_ctx = {
             'alias_model_name': self.get_alias_model_name({}),
             'alias_parent_model_name': self._name,
@@ -257,3 +262,21 @@ class AliasMixin(models.AbstractModel):
             record.with_context({'mail_notrack': True}).alias_id = alias
             _logger.info('Mail alias created for %s %s (id %s)',
                          record._name, record.display_name, record.id)
+
+    def _alias_check_contact(self, message, message_dict, alias):
+        author = self.env['res.partner'].browse(message_dict.get('author_id', False))
+        if alias.alias_contact == 'followers' and self.ids:
+            if not hasattr(self, "message_partner_ids") or not hasattr(self, "message_channel_ids"):
+                return {
+                    'error_mesage': _('incorrectly configured alias'),
+                }
+            accepted_partner_ids = self.message_partner_ids | self.message_channel_ids.mapped('channel_partner_ids')
+            if not author or author not in accepted_partner_ids:
+                return {
+                    'error_mesage': _('restricted to followers'),
+                }
+        elif alias.alias_contact == 'partners' and not author:
+            return {
+                'error_message': _('restricted to known authors')
+            }
+        return True

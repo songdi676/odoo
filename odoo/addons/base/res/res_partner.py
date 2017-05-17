@@ -6,17 +6,17 @@ import datetime
 import hashlib
 import pytz
 import threading
-import urllib2
-import urlparse
 
 from email.utils import formataddr
+
+import requests
 from lxml import etree
+from werkzeug import urls
 
 from odoo import api, fields, models, tools, SUPERUSER_ID, _
 from odoo.modules import get_module_resource
 from odoo.osv.expression import get_unaccent_wrapper
 from odoo.exceptions import UserError, ValidationError
-from odoo.osv.orm import browse_record
 
 # Global variables used for the warning fields declared on the res.partner
 # in the following modules : sale, purchase, account, stock 
@@ -127,7 +127,7 @@ class PartnerTitle(models.Model):
     _sql_constraints = [('name_uniq', 'unique (name)', "Title name already exists !")]
 
 class Partner(models.Model):
-    _description = 'Partner'
+    _description = 'Contact'
     _inherit = ['format.address.mixin']
     _name = "res.partner"
     _order = "display_name"
@@ -351,10 +351,12 @@ class Partner(models.Model):
                 result['value'] = {key: convert(self.parent_id[key]) for key in address_fields}
         return result
 
-    @api.onchange('state_id')
-    def onchange_state(self):
-        if self.state_id:
-            self.country_id = self.state_id.country_id
+    @api.onchange('country_id')
+    def _onchange_country_id(self):
+        if self.country_id:
+            return {'domain': {'state_id': [('country_id', '=', self.country_id.id)]}}
+        else:
+            return {'domain': {'state_id': []}}
 
     @api.onchange('email')
     def onchange_email(self):
@@ -428,6 +430,7 @@ class Partner(models.Model):
         sync_children = self.child_ids.filtered(lambda c: not c.is_company)
         for child in sync_children:
             child._commercial_sync_to_children()
+        sync_children._compute_commercial_partner()
         return sync_children.write(sync_vals)
 
     @api.multi
@@ -451,6 +454,10 @@ class Partner(models.Model):
                 commercial_fields = self._commercial_fields()
                 if any(field in values for field in commercial_fields):
                     self._commercial_sync_to_children()
+            for child in self.child_ids.filtered(lambda c: not c.is_company):
+                if child.commercial_partner_id != self.commercial_partner_id :
+                    self._commercial_sync_to_children()
+                    break
             # 2b. Address fields: sync if address changed
             address_fields = self._address_fields()
             if any(field in values for field in address_fields):
@@ -469,11 +476,11 @@ class Partner(models.Model):
             parent.update_address(addr_vals)
 
     def _clean_website(self, website):
-        (scheme, netloc, path, params, query, fragment) = urlparse.urlparse(website)
-        if not scheme:
-            if not netloc:
-                netloc, path = path, ''
-            website = urlparse.urlunparse(('http', netloc, path, params, query, fragment))
+        url = urls.url_parse(website)
+        if not url.scheme:
+            if not url.netloc:
+                url = url.replace(netloc=url.path, path='')
+            website = url.replace(scheme='http').to_url()
         return website
 
     @api.multi
@@ -612,7 +619,7 @@ class Partner(models.Model):
             raise UserError(_("Couldn't create contact without email address!"))
         if not name and email:
             name = email
-        partner = self.create({self._rec_name: name or email, 'email': email or False})
+        partner = self.create({self._rec_name: name or email, 'email': email or self.env.context.get('default_email', False)})
         return partner.name_get()[0]
 
     @api.model
@@ -668,7 +675,7 @@ class Partner(models.Model):
                 query += ' limit %s'
                 where_clause_params.append(limit)
             self.env.cr.execute(query, where_clause_params)
-            partner_ids = map(lambda x: x[0], self.env.cr.fetchall())
+            partner_ids = [row[0] for row in self.env.cr.fetchall()]
 
             if partner_ids:
                 return self.browse(partner_ids).name_get()
@@ -691,15 +698,12 @@ class Partner(models.Model):
         return partners.id or self.name_create(email)[0]
 
     def _get_gravatar_image(self, email):
-        gravatar_image = False
         email_hash = hashlib.md5(email.lower()).hexdigest()
         url = "https://www.gravatar.com/avatar/" + email_hash
-        try:
-            image_content = urllib2.urlopen(url + "?d=404&s=128", timeout=5).read()
-            gravatar_image = base64.b64encode(image_content)
-        except Exception:
-            pass
-        return gravatar_image
+        res = requests.get(url, params={'d': '404', 's': '128'}, timeout=5)
+        if res.status_code != requests.codes.ok:
+            return False
+        return base64.b64encode(res.content)
 
     @api.multi
     def _email_send(self, email_from, subject, body, on_error=None):

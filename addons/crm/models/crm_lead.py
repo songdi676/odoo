@@ -30,7 +30,6 @@ CRM_LEAD_FIELDS_TO_MERGE = [
     'city',
     'contact_name',
     'description',
-    'email',
     'fax',
     'mobile',
     'partner_name',
@@ -42,7 +41,6 @@ CRM_LEAD_FIELDS_TO_MERGE = [
     'zip',
     'create_date',
     'date_action_last',
-    'date_action_next',
     'email_from',
     'email_cc',
     'website',
@@ -71,7 +69,6 @@ class Lead(models.Model):
         help="Linked partner (optional). Usually created when converting the lead.")
     active = fields.Boolean('Active', default=True)
     date_action_last = fields.Datetime('Last Action', readonly=True)
-    date_action_next = fields.Datetime('Next Action', readonly=True)
     email_from = fields.Char('Email', help="Email address of the contact", index=True)
     website = fields.Char('Website', index=True, help="Website of the contact")
     team_id = fields.Many2one('crm.team', string='Sales Channel', oldname='section_id', default=lambda self: self.env['crm.team'].sudo()._get_default_team_id(user_id=self.env.uid),
@@ -91,7 +88,7 @@ class Lead(models.Model):
     type = fields.Selection([('lead', 'Lead'), ('opportunity', 'Opportunity')], index=True, required=True,
         default=lambda self: 'lead' if self.env['res.users'].has_group('crm.group_use_lead') else 'opportunity',
         help="Type is used to separate Leads and Opportunities")
-    priority = fields.Selection(crm_stage.AVAILABLE_PRIORITIES, string='Rating', index=True, default=crm_stage.AVAILABLE_PRIORITIES[0][0])
+    priority = fields.Selection(crm_stage.AVAILABLE_PRIORITIES, string='Priority', index=True, default=crm_stage.AVAILABLE_PRIORITIES[0][0])
     date_closed = fields.Datetime('Closed Date', readonly=True, copy=False)
 
     stage_id = fields.Many2one('crm.stage', string='Stage', track_visibility='onchange', index=True,
@@ -436,9 +433,6 @@ class Lead(models.Model):
             res = _get_first_not_null(attr, opportunities)
             return res.id if res else False
 
-        def _concat_all(attr, opportunities):
-            return '\n\n'.join(filter(None, (opp[attr] for opp in opportunities)))
-
         # process the fields' values
         data = {}
         for field_name in fields:
@@ -450,7 +444,7 @@ class Lead(models.Model):
             elif field.type == 'many2one':
                 data[field_name] = _get_first_not_null_id(field_name, self)  # take the first not null
             elif field.type == 'text':
-                data[field_name] = _concat_all(field_name, self)  # contact field of all opportunities
+                data[field_name] = '\n\n'.join(it for it in self.mapped(field_name) if it)
             else:
                 data[field_name] = _get_first_not_null(field_name, self)
 
@@ -466,24 +460,21 @@ class Lead(models.Model):
         """
         title = "%s : %s\n" % (_('Merged opportunity') if self.type == 'opportunity' else _('Merged lead'), self.name)
         body = [title]
-        for field_name in fields:
-            field = self._fields.get(field_name)
-            if field is None:
-                continue
-
-            value = self[field_name]
-            if field.type == 'selection':
+        fields = self.env['ir.model.fields'].search([('name', 'in', fields or []), ('model_id.model', '=', self._name)])
+        for field in fields:
+            value = getattr(self, field.name, False)
+            if field.ttype == 'selection':
                 value = dict(field.get_values(self.env)).get(value, value)
-            elif field.type == 'many2one':
+            elif field.ttype == 'many2one':
                 if value:
                     value = value.sudo().name_get()[0][1]
-            elif field.type == 'many2many':
+            elif field.ttype == 'many2many':
                 if value:
                     value = ','.join(
                         val.name_get()[0][1]
                         for val in value.sudo()
                     )
-            body.append("%s: %s" % (field.string, value or ''))
+            body.append("%s: %s" % (field.field_description, value or ''))
         return "<br/>".join(body + ['<br/>'])
 
     @api.multi
@@ -900,7 +891,7 @@ class Lead(models.Model):
             'nb_opportunities': 0,
         }
 
-        opportunities = self.search([('type', '=', 'opportunity'), ('user_id', '=', self._uid)])
+        opportunities = self.search([('type', '=', 'opportunity'), ('user_id', '=', self._uid), ('activity_date_deadline', '!=', False)])
 
         for opp in opportunities:
             # Expected closing
@@ -1041,12 +1032,21 @@ class Lead(models.Model):
         return {lead.id: aliases.get(lead.team_id.id or 0, False) for lead in leads}
 
     @api.multi
-    def get_formview_id(self):
+    def get_formview_id(self, access_uid=None):
         if self.type == 'opportunity':
             view_id = self.env.ref('crm.crm_case_form_view_oppor').id
         else:
             view_id = super(Lead, self).get_formview_id()
         return view_id
+
+    @api.multi
+    def message_get_default_recipients(self):
+        return {
+            r.id : {'partner_ids': [],
+                    'email_to': r.email_from,
+                    'email_cc': False}
+            for r in self.sudo()
+        }
 
     @api.multi
     def message_get_suggested_recipients(self):
@@ -1110,6 +1110,19 @@ class Lead(models.Model):
                 update_vals[key] = res.group(2).lower()
         return super(Lead, self).message_update(msg_dict, update_vals=update_vals)
 
+    def _message_post_after_hook(self, message):
+        if self.email_from and not self.partner_id:
+            # we consider that posting a message with a specified recipient (not a follower, a specific one)
+            # on a document without customer means that it was created through the chatter using
+            # suggested recipients. This heuristic allows to avoid ugly hacks in JS.
+            new_partner = message.partner_ids.filtered(lambda partner: partner.email == self.email_from)
+            if new_partner:
+                self.search([
+                    ('partner_id', '=', False),
+                    ('email_from', '=', new_partner.email),
+                    ('stage_id.fold', '=', False)]).write({'partner_id': new_partner.id})
+        return super(Lead, self)._message_post_after_hook(message)
+
     @api.multi
     def message_partner_info_from_emails(self, emails, link_mail=False):
         result = super(Lead, self).message_partner_info_from_emails(emails, link_mail=link_mail)
@@ -1129,7 +1142,7 @@ class Tag(models.Model):
     _description = "Category of lead"
 
     name = fields.Char('Name', required=True, translate=True)
-    color = fields.Integer('Color Index')
+    color = fields.Integer('Color Index', default=10)
 
     _sql_constraints = [
         ('name_uniq', 'unique (name)', "Tag name already exists !"),

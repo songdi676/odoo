@@ -12,6 +12,7 @@ from dateutil.relativedelta import relativedelta
 
 from odoo import api, fields, models, SUPERUSER_ID
 from odoo.modules.registry import Registry
+from odoo.tools import pycompat
 from odoo.tools.safe_eval import safe_eval
 
 _logger = logging.getLogger(__name__)
@@ -55,14 +56,8 @@ class BaseAutomation(models.Model):
                                            string='Delay type', default='day')
     trg_date_calendar_id = fields.Many2one("resource.calendar", string='Use Calendar',
                                             help="When calculating a day-based timed condition, it is possible to use a calendar to compute the date based on working days.")
-    filter_pre_id = fields.Many2one("ir.filters", string='Before Update Filter', ondelete='restrict',
-                                    domain="[('model_id', '=', model_name)]",
-                                    help="If present, this condition must be satisfied before the update of the record.")
     filter_pre_domain = fields.Char(string='Before Update Domain',
                                     help="If present, this condition must be satisfied before the update of the record.")
-    filter_id = fields.Many2one("ir.filters", string='Filter', ondelete='restrict',
-                                domain="[('model_id', '=', model_name)]",
-                                help="If present, this condition must be satisfied before executing the action rule.")
     filter_domain = fields.Char(string='Domain', help="If present, this condition must be satisfied before executing the action rule.")
     last_run = fields.Datetime(readonly=True, copy=False)
     on_change_fields = fields.Char(string="On Change Fields Trigger", help="Comma-separated list of field names that triggers the onchange.")
@@ -72,25 +67,16 @@ class BaseAutomation(models.Model):
 
     @api.onchange('model_id')
     def onchange_model_id(self):
-        self.filter_pre_id = self.filter_id = False
         self.model_name = self.model_id.model
 
     @api.onchange('trigger')
     def onchange_trigger(self):
         if self.trigger in ['on_create', 'on_create_or_write', 'on_unlink']:
-            self.filter_pre_id = self.filter_pre_domain = self.trg_date_id = self.trg_date_range = self.trg_date_range_type = False
+            self.filter_pre_domain = self.trg_date_id = self.trg_date_range = self.trg_date_range_type = False
         elif self.trigger in ['on_write', 'on_create_or_write']:
             self.trg_date_id = self.trg_date_range = self.trg_date_range_type = False
         elif self.trigger == 'on_time':
-            self.filter_pre_id = self.filter_pre_domain = False
-
-    @api.onchange('filter_pre_id')
-    def onchange_filter_pre_id(self):
-        self.filter_pre_domain = self.filter_pre_id.domain
-
-    @api.onchange('filter_id')
-    def onchange_filter_id(self):
-        self.filter_domain = self.filter_id.domain
+            self.filter_pre_domain = False
 
     @api.model
     def create(self, vals):
@@ -129,7 +115,7 @@ class BaseAutomation(models.Model):
             self._cr.commit()
             self.env.reset()
             registry = Registry.new(self._cr.dbname)
-            registry.signal_registry_change()
+            registry.registry_invalidated = True
 
     def _get_actions(self, records, triggers):
         """ Return the actions of the given triggers for records' model. The
@@ -155,11 +141,7 @@ class BaseAutomation(models.Model):
 
     def _filter_pre(self, records):
         """ Filter the records that satisfy the precondition of action ``self``. """
-        if self.filter_pre_id and records:
-            domain = [('id', 'in', records.ids)] + safe_eval(self.filter_pre_id.domain, self._get_eval_context())
-            ctx = safe_eval(self.filter_pre_id.context)
-            return records.with_context(**ctx).search(domain).with_env(records.env)
-        elif self.filter_pre_domain and records:
+        if self.filter_pre_domain and records:
             domain = [('id', 'in', records.ids)] + safe_eval(self.filter_pre_domain, self._get_eval_context())
             return records.search(domain)
         else:
@@ -167,11 +149,7 @@ class BaseAutomation(models.Model):
 
     def _filter_post(self, records):
         """ Filter the records that satisfy the postcondition of action ``self``. """
-        if self.filter_id and records:
-            domain = [('id', 'in', records.ids)] + safe_eval(self.filter_id.domain, self._get_eval_context())
-            ctx = safe_eval(self.filter_id.context)
-            return records.with_context(**ctx).search(domain).with_env(records.env)
-        elif self.filter_domain and records:
+        if self.filter_domain and records:
             domain = [('id', 'in', records.ids)] + safe_eval(self.filter_domain, self._get_eval_context())
             return records.search(domain)
         else:
@@ -179,13 +157,18 @@ class BaseAutomation(models.Model):
 
     def _process(self, records):
         """ Process action ``self`` on the ``records`` that have not been done yet. """
-        # filter out the records on which self has already been done, then mark
-        # remaining records as done (to avoid recursive processing)
+        # filter out the records on which self has already been done
         action_done = self._context['__action_done']
-        records -= action_done.setdefault(self, records.browse())
+        records_done = action_done.get(self, records.browse())
+        records -= records_done
         if not records:
             return
-        action_done[self] |= records
+
+        # mark the remaining records as done (to avoid recursive processing)
+        action_done = dict(action_done)
+        action_done[self] = records_done + records
+        self = self.with_context(__action_done=action_done)
+        records = records.with_context(__action_done=action_done)
 
         # modify records
         values = {}
@@ -281,7 +264,7 @@ class BaseAutomation(models.Model):
                 if res:
                     if 'value' in res:
                         res['value'].pop('id', None)
-                        self.update({key: val for key, val in res['value'].iteritems() if key in self._fields})
+                        self.update({key: val for key, val in pycompat.items(res['value']) if key in self._fields})
                     if 'domain' in res:
                         result.setdefault('domain', {}).update(res['domain'])
                     if 'warning' in res:
@@ -322,11 +305,11 @@ class BaseAutomation(models.Model):
     @api.model
     def _check_delay(self, action, record, record_dt):
         if action.trg_date_calendar_id and action.trg_date_range_type == 'day':
-            return action.trg_date_calendar_id.schedule_days_get_date(
+            return action.trg_date_calendar_id.plan_days(
                 action.trg_date_range,
                 day_date=fields.Datetime.from_string(record_dt),
                 compute_leaves=True,
-            )[0]
+            )
         else:
             delay = DATE_RANGE_FUNCTION[action.trg_date_range_type](action.trg_date_range)
             return fields.Datetime.from_string(record_dt) + delay
@@ -347,15 +330,6 @@ class BaseAutomation(models.Model):
             context = dict(self._context)
             if action.filter_domain:
                 domain = safe_eval(action.filter_domain, eval_context)
-            elif action.filter_id:
-                domain = safe_eval(action.filter_id.domain, eval_context)
-                context.update(safe_eval(action.filter_id.context))
-                if 'lang' not in context:
-                    # Filters might be language-sensitive, attempt to reuse creator lang
-                    # as we are usually running this as super-user in background
-                    filter_meta = action.filter_id.get_metadata()[0]
-                    user_id = (filter_meta['write_uid'] or filter_meta['create_uid'])[0]
-                    context['lang'] = self.env['res.users'].browse(user_id).lang
             records = self.env[action.model_name].with_context(context).search(domain)
 
             # determine when action should occur for the records

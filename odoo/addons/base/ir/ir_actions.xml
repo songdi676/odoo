@@ -42,14 +42,14 @@
             <field name="view_id" ref="action_view_tree"/>
             <field name="search_view_id" ref="action_view_search"/>
         </record>
-        <menuitem id="next_id_6" name="Actions" parent="base.menu_custom" sequence="2"/>
+        <menuitem id="next_id_6" name="Actions" parent="base.menu_custom" sequence="5"/>
         <menuitem action="ir_sequence_actions" id="menu_ir_sequence_actions" parent="next_id_6"/>
 
-        <!-- ir.actions.report.xml -->
+        <!-- ir.actions.report -->
 
         <record id="act_report_xml_view" model="ir.ui.view">
-            <field name="name">ir.actions.report.xml</field>
-            <field name="model">ir.actions.report.xml</field>
+            <field name="name">ir.actions.report</field>
+            <field name="model">ir.actions.report</field>
             <field name="arch" type="xml">
                 <form string="Report">
                     <field name="ir_values_id" invisible="1"/>
@@ -61,41 +61,32 @@
                             <button name="unlink_action" string="Remove from the 'Print' menu" type="object"
                                     attrs="{'invisible':[('ir_values_id','=',False)]}" icon="fa-minus-square"
                                     help="Remove the contextual action related this report" class="oe_stat_button"/>
+                            <button name="associated_view" string="QWeb views" type="object"
+                                    attrs="{'invisible':[('report_type', 'not in', ['qweb-pdf', 'qweb-html'])]}" icon='fa-code'
+                                    class="oe_stat_button"/>
                         </div>
                         <group>
                             <group>
                                 <field name="name"/>
                                 <field name="report_type"/>
+                                <field name="paperformat_id"
+                                       attrs="{'invisible':[('report_type','not in',['qweb-pdf'])]}"/>
                             </group>
                             <group>
                                 <field name="model"/>
-                                <field name="report_name" attrs="{'invisible':[('report_type','=', 'controller')]}"/>
-                                <field name="report_rml" attrs="{'invisible':[('report_type','!=', 'controller')]}"/>
+                                <field name="report_name"/>
+                                <field name="print_report_name" />
                             </group>
                         </group>
                         <notebook>
                             <page name="security" string="Security">
                                 <field name="groups_id"/>
                             </page>
-                            <page name='rml' string="RML Configuration" attrs="{'invisible':[('report_type','not in',['pdf','sxw'])]}">
-                                <group>
-                                    <group string="RML Report">
-                                        <field name="header"/>
-                                        <field name="report_file"/>
-                                        <field name="auto"/>
-                                        <field name="parser"/>
-                                    </group>
-                                    <group string="XML Report">
-                                        <field name="report_xsl"/>
-                                        <field name="report_xml"/>
-                                    </group>
-                                </group>
-                            </page>
                             <page name='advanced' string="Advanced Properties">
                                 <group>
                                     <field name="multi"/>
-                                    <field name="attachment_use" attrs="{'invisible':[('report_type','=', 'controller')]}"/>
-                                    <field name="attachment" attrs="{'invisible':[('report_type','=', 'controller')]}"/>
+                                    <field name="attachment_use"/>
+                                    <field name="attachment"/>
                                 </group>
                             </page>
                         </notebook>
@@ -104,8 +95,8 @@
             </field>
         </record>
         <record id="act_report_xml_view_tree" model="ir.ui.view">
-            <field name="name">ir.actions.report.xml.tree</field>
-            <field name="model">ir.actions.report.xml</field>
+            <field name="name">ir.actions.report.tree</field>
+            <field name="model">ir.actions.report</field>
             <field name="arch" type="xml">
                 <tree string="Report xml">
                     <field name="name"/>
@@ -118,8 +109,8 @@
             </field>
         </record>
         <record id="act_report_xml_search_view" model="ir.ui.view">
-            <field name="name">ir.actions.report.xml.search</field>
-            <field name="model">ir.actions.report.xml</field>
+            <field name="name">ir.actions.report.search</field>
+            <field name="model">ir.actions.report</field>
             <field name="arch" type="xml">
                 <search string="Report Xml">
                     <field name="name"
@@ -133,15 +124,15 @@
                 </search>
             </field>
         </record>
-        <record id="ir_action_report_xml" model="ir.actions.act_window">
+        <record id="ir_action_report" model="ir.actions.act_window">
             <field name="name">Reports</field>
             <field name="type">ir.actions.act_window</field>
-            <field name="res_model">ir.actions.report.xml</field>
+            <field name="res_model">ir.actions.report</field>
             <field name="view_type">form</field>
             <field name="view_id" ref="act_report_xml_view_tree"/>
             <field name="search_view_id" ref="act_report_xml_search_view"/>
         </record>
-        <menuitem action="ir_action_report_xml" id="menu_ir_action_report_xml" parent="base.next_id_6"/>
+        <menuitem action="ir_action_report" id="menu_ir_action_report" parent="base.next_id_6"/>
 
         <!-- ir.actions.act_window -->
 
@@ -155,6 +146,7 @@
                     <field name="view_type"/>
                     <field name="view_id"/>
                     <field name="domain"/>
+                    <field name="context"/>
                 </tree>
             </field>
         </record>
@@ -180,7 +172,6 @@
                         <page string="General Settings">
                             <group>
                                 <group string="Views">
-                                    <field name="view_type"/>
                                     <field name="view_mode"/>
                                     <field name="view_id"/>
                                     <field name="search_view_id"/>
@@ -264,13 +255,13 @@
                 <form string="Server Action">
                     <header>
                         <field name="menu_ir_values_id" invisible="1"/>
-                        <button name="create_action" string="Create Action" type="object"
+                        <button name="create_action" string="Create Contextual Action" type="object"
                                 class="btn-primary"
                                 attrs="{'invisible':[('menu_ir_values_id','!=',False)]}"
-                                help="Display an option in the 'More' top-menu or related document, to run this action."/>
-                        <button name="unlink_action" string="Remove Action" type="object" 
+                                help="Display an option in the 'More' top-menu in order to run this action."/>
+                        <button name="unlink_action" string="Remove Contextual Action" type="object"
                                 attrs="{'invisible':[('menu_ir_values_id','=',False)]}"
-                                help="Remove the contextual action related to this server action"/>
+                                help="Remove 'More' top-menu contextual action related to this action"/>
                     </header>
                     <sheet>
                         <div class="oe_title">
@@ -328,7 +319,9 @@
                                         <p>Various fields may use Python code or Python expressions. The following variables can be used:</p>
                                         <ul>
                                             <li>env: Odoo Environement on which the action is triggered</li>
-                                            <li>record: browse_record of the record on which the action is triggered</li>
+                                            <li>model: Odoo Model of the record on which the action is triggered; is a void recordset</li>
+                                            <li>record: browse record on which the action is triggered</li>
+                                            <li>records: record set of records on which the action is triggered in multi mode</li>
                                             <li>time, datetime, timezone: Python module</li>
                                             <li>log(message, level='info'): a logging function to create ir_logging records</li>
                                         </ul>

@@ -25,8 +25,8 @@
                 <field name="user_id"/>
                 <templates>
                     <t t-name="kanban-box">
-                        <div t-attf-class="#{kanban_color(record.color.raw_value)}">
-                            <div class="o_kanban_card_header">
+                        <div>
+                            <div t-attf-class="o_kanban_card_header #{kanban_color(record.color.raw_value)}">
                                 <div class="o_kanban_card_header_title">
                                     <div class="o_primary"><t t-esc="record.name.value"/></div>
                                     <div t-if="record.alias_name.value and record.alias_domain.value and record.state.raw_value == 'recruit'" class="o_secondary o_job_alias">
@@ -34,7 +34,7 @@
                                     </div>
                                 </div>
                                 <div class="o_kanban_manage_button_section">
-                                    <a class="o_kanban_manage_toggle_button" href="#">More <i class="fa fa-caret-down"/></a>
+                                    <a class="o_kanban_manage_toggle_button" href="#"><i class="fa fa-ellipsis-v" /></a>
                                 </div>
                             </div>
                             <div class="container o_kanban_card_content o_visible">
@@ -56,7 +56,7 @@
                                     </div>
                                     <div class="row">
                                         <div class="col-xs-12 o_kanban_primary_bottom">
-                                            <field name="no_of_hired_employee" widget="progress" title="Hired Employees" options="{'current_value': 'no_of_hired_employee', 'max_value': 'no_of_recruitment', 'editable': true, 'edit_max_value': true, 'on_change': 'action_set_no_of_recruitment'}"/>
+                                            <field name="no_of_hired_employee" widget="progressbar" title="Hired Employees" options="{'current_value': 'no_of_hired_employee', 'max_value': 'no_of_recruitment', 'editable': true, 'edit_max_value': true}"/>
                                         </div>
                                     </div>
                                 </t>

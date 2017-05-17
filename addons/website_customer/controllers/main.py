@@ -42,7 +42,7 @@ class WebsiteCustomer(http.Controller):
 
         if tag_id:
             tag_id = unslug(tag_id)[1] or 0
-            domain += [('tag_ids', 'in', tag_id)]
+            domain += [('website_tag_ids', 'in', tag_id)]
 
         # group by country, based on customers found with the search(domain)
         countries = Partner.sudo().read_group(domain, ["id", "country_id"], groupby="country_id", orderby="country_id")
@@ -77,7 +77,7 @@ class WebsiteCustomer(http.Controller):
         )
 
         partners = Partner.sudo().search(domain, offset=pager['offset'], limit=self._references_per_page)
-        google_map_partner_ids = ','.join(map(str, partners.ids))
+        google_map_partner_ids = ','.join(str(it) for it in partners.ids)
         google_maps_api_key = request.env['ir.config_parameter'].sudo().get_param('google_maps_api_key')
 
         tags = Tag.search([('website_published', '=', True), ('partner_ids', 'in', partners.ids)], order='classname, name ASC')
